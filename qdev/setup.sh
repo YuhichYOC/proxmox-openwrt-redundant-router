@@ -117,13 +117,13 @@ write_usr_local_bin_add_ovs_switch_sh () {
 		echo "Configuring \$MGMT_PORT..."
 		ovs-vsctl --if-exists del-port \$BR_MGMT \$MGMT_PORT
 		ovs-vsctl add-port \$BR_MGMT \$MGMT_PORT -- set interface \$MGMT_PORT type=internal
+		ip link set \$MGMT_PORT up
 		for i in {1..\$MAX_WAIT}; do
 		    if ip link show \$MGMT_PORT > /dev/null 2>&1; then
 		        break
 		    fi
 		    sleep 1
 		done
-		ip link set \$MGMT_PORT up
 		ip addr add \$MGMT_CIDR dev \$MGMT_PORT
 
 		# inet0 インターフェース設定
