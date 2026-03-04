@@ -682,7 +682,7 @@ write_network_configuration () {
 		    ovs_bridge $SETUP_BR_WAN
 
 		auto $SETUP_BR_WAN
-		iface $SETUP_BR_WAN inet dhcp
+		iface $SETUP_BR_WAN inet manual
 		    ovs_type OVSBridge
 		    ovs_ports $SETUP_PHYSICAL_WAN_PORT
 
