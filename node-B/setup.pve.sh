@@ -237,113 +237,6 @@ write_usr_local_bin_wait_for_ovs_intport_sh () {
 	chmod +x /usr/local/bin/wait_for_ovs_intport.sh
 }
 
-write_usr_local_bin_interface_post_up_sh () {
-	cat <<-EOF > /usr/local/bin/interface-post-up.sh
-		#!/bin/bash
-		set -e
-
-		IFACE="\$1"
-		CONFIG_FILE="/etc/openvswitch/networks.conf"
-
-		log_message () {
-		    echo "[\$(date '+%Y-%m-%d %H:%M:%S')] \$1" | tee -a /var/log/pve-interface-config.log
-		}
-
-		if [ -z "\$IFACE" ]; then
-		    log_message "ERROR: No interface specified"
-		    echo "Usage: \$0 <interface>" >&2
-		    exit 1
-		fi
-
-		if [ ! -f "\$CONFIG_FILE" ]; then
-		    log_message "ERROR: Configuration file \$CONFIG_FILE not found"
-		    exit 1
-		fi
-
-		source "\$CONFIG_FILE"
-
-		log_message "Configuring interface: \$IFACE"
-
-		configure_mgmt0 () {
-		    log_message "  Setting static address: \$MGMT_ADDRESS"
-		    if [ -z "\$MGMT_ADDRESS" ]; then
-		        log_message "ERROR: MGMT_ADDRESS not defined"
-		        exit 1
-		    fi
-
-		    ip addr flush dev "\$IFACE" 2>/dev/null || true
-		    ip addr add "\$MGMT_ADDRESS" dev "\$IFACE"
-		    log_message "  Configuration complete: \$IFACE = \$MGMT_ADDRESS"
-		}
-
-		configure_dhcp_inet0 () {
-		    log_message "  Acquiring IP address via DHCP"
-		    if [ -n "\$INET_GATEWAY" ]; then
-		        # デフォルトルートを削除してから追加
-		        ip route del default 2>/dev/null || true
-		        ip route add default via "\$INET_GATEWAY" dev "\$IFACE"
-		    fi
-
-		    dhclient -r "\$IFACE"
-		    if dhclient "\$IFACE"; then
-		        log_message "  DHCP successful: \$IFACE acquired \$(ip -4 addr show \$IFACE | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -1)"
-		    else
-		        log_message "ERROR: DHCP failed for \$IFACE"
-		        exit 1
-		    fi
-		}
-
-		configure_static_inet0 () {
-		    log_message "  Setting static address: \$INET_ADDRESS"
-		    if [ -z "\$INET_ADDRESS" ]; then
-		        log_message "ERROR: INET_ADDRESS not defined for static mode"
-		        exit 1
-		    fi
-
-		    if [ -n "\$INET_GATEWAY" ]; then
-		        # デフォルトルートを削除してから追加
-		        ip route del default 2>/dev/null || true
-		        ip route add default via "\$INET_GATEWAY" dev "\$IFACE"
-		    fi
-
-		    ip addr flush dev "\$IFACE" 2>/dev/null || true
-		    ip addr add "\$INET_ADDRESS" dev "\$IFACE"
-		    log_message "  Configuration complete: \$IFACE = \$INET_ADDRESS"
-		}
-
-		case "\$IFACE" in
-		    mgmt0)
-		        configure_mgmt0
-		        ;;
-
-		    inet0)
-		        case "\$INET_MODE" in
-		            dhcp)
-		                configure_dhcp_inet0
-		                ;;
-
-		            static)
-		                configure_static_inet0
-		                ;;
-		            *)
-		                log_message "ERROR: Invalid INET_MODE: \$INET_MODE"
-		                exit 1
-		                ;;
-		        esac
-		        ;;
-
-		    *)
-		        log_message "ERROR: Unknown interface: \$IFACE"
-		        exit 1
-		        ;;
-		esac
-
-		log_message "Interface \$IFACE configured successfully"
-	EOF
-
-	chmod +x /usr/local/bin/interface-post-up.sh
-}
-
 write_usr_local_bin_apply_openflow_sh () {
 	cat <<-EOF > /usr/local/bin/apply-openflow.sh
 		#!/bin/bash
@@ -742,16 +635,13 @@ write_network_configuration () {
 		iface $SETUP_PVEL3_MGMT_PORT inet static
 		    ovs_type OVSIntPort
 		    ovs_bridge $SETUP_BR_PVEL3
-		    post-up /usr/local/bin/interface-post-up.sh \$IFACE
-		    post-down ip addr flush dev \$IFACE
+		    address $SETUP_PVE_MGMT_CIDR
 
 		# 家庭 LAN 用内部ポート
 		auto $SETUP_PVEL3_INET_PORT
-		iface $SETUP_PVEL3_INET_PORT inet static
+		iface $SETUP_PVEL3_INET_PORT inet dhcp
 		    ovs_type OVSIntPort
 		    ovs_bridge $SETUP_BR_PVEL3
-		    post-up /usr/local/bin/interface-post-up.sh \$IFACE
-		    post-down ip addr flush dev \$IFACE
 
 		# ===== パッチポート定義 =====
 
@@ -916,7 +806,6 @@ setup_main() {
 	write_etc_systemd_system_apply_openflow_service
 	write_usr_local_bin_get_ofport_sh
 	write_usr_local_bin_wait_for_ovs_intport_sh
-	write_usr_local_bin_interface_post_up_sh
 	write_usr_local_bin_apply_openflow_sh
 	write_var_lib_vz_snippets_snippets_openflow_hook_sh
 	echo "Writing network configuration..."
