@@ -32,6 +32,8 @@ SETUP_INET_NET="192.168.101.0/24"
 SETUP_PVE_MGMT_CIDR="192.168.82.2/24"
 # 引数 : この Proxmox ノードが管理 & クラスターで使用する IP アドレス ( IPv4 )
 SETUP_PVE_MGMT_IPV4="192.168.82.2"
+# 引数 : この Proxmox ノードがインターネットアクセスにアクセスする IP アドレス ( CIDR )
+SETUP_PVE_INET_CIDR="192.168.101.252/24"
 # 引数 : Proxmox クラスターに存在するノードの IP アドレス ( IPv4 )
 SETUP_CLUSTER_NODES=("192.168.82.1" "192.168.82.2" "192.168.82.3") # ノード 1, 2, QDevice
 
@@ -639,9 +641,10 @@ write_network_configuration () {
 
 		# 家庭 LAN 用内部ポート
 		auto $SETUP_PVEL3_INET_PORT
-		iface $SETUP_PVEL3_INET_PORT inet dhcp
+		iface $SETUP_PVEL3_INET_PORT inet static
 		    ovs_type OVSIntPort
 		    ovs_bridge $SETUP_BR_PVEL3
+		    address $SETUP_PVE_INET_CIDR
 
 		# ===== パッチポート定義 =====
 
