@@ -25,8 +25,12 @@ SETUP_SNIPPET_DIRECTORY="/var/lib/vz/snippets"
 
 # 引数 : 監視対象 WAN 側物理 NIC の名前
 SETUP_PHYSICAL_WAN_PORT="ens33"
+# 引数 : 監視対象 WAN 側 NIC の MAC アドレス
+SETUP_WAN_MACADDR="02:50:58:00:00:04"
 # 引数 : 監視対象 WAN 側物理 NIC が接続している OVS 仮想ブリッジの名前
 SETUP_BR_WAN="br0_wan"
+# 引数 : LAN 側 NIC の MAC アドレス
+SETUP_LAN_MACADDR="02:50:58:00:05:04"
 # 引数 : Suricata コンテナが LAN と接続する OVS 仮想ブリッジの名前
 SETUP_BR_INET="br5_inet"
 # 引数 : パケットスニッフィングのために作成する OVS ミラーの名前
@@ -58,8 +62,8 @@ create_container () {
 		--memory 2048 \
 		--swap 2048 \
 		--cores 4 \
-		--net0 name=eth0,bridge=$SETUP_BR_WAN,firewall=0 \
-		--net1 name=lan0,bridge=$SETUP_BR_INET,firewall=0,ip=dhcp \
+		--net0 name=eth0,bridge=$SETUP_BR_WAN,hwaddr=$SETUP_WAN_MACADDR,firewall=0 \
+		--net1 name=lan0,bridge=$SETUP_BR_INET,hwaddr=$SETUP_LAN_MACADDR,firewall=0,ip=dhcp \
 		--ostype ubuntu \
 		--unprivileged 1 \
 		--features nesting=1
