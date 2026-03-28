@@ -303,6 +303,7 @@ wait_for_nic_up () {
 install_packages () {
 	# OpenWrt 25 以降はパッケージ管理コマンドが opkg → apk へ変更される
 	opkg update
+	# OpenWrt 25 以降は opkg install → apk add へ変更される
 	opkg install keepalived iputils-arping tcpdump
 }
 
