@@ -17,6 +17,13 @@ SETUP_PHYSICAL_WAN_PORT="ens33"
 # 引数 : このノードで稼働する OpenWrt VM が LAN 側の NIC として利用する物理 NIC
 SETUP_PHYSICAL_LAN_PORTS=("ens34" "ens35")
 
+# 引数 : Enterprise Repository を無効化するか
+SETUP_DISABLE_ENTERPRISE_REPOSITORY=false
+# 引数 : Debian ミラーリポジトリの指定を変更するか
+SETUP_CHANGE_DEBIAN_MIRROR=false
+# 引数 : Debian ミラーリポジトリの URL
+SETUP_DEBIAN_MIRROR_URL="http://ftp.jp.debian.org/debian/"
+
 # 引数 : Proxmox ノードセットアップ中に一時的に利用するルーターの IP アドレス
 SETUP_TEMPORARY_GATEWAY="192.168.200.1"
 # 引数 : Proxmox ノード管理 & クラスターネットワークの先頭 3 オクテット
@@ -147,7 +154,32 @@ restart_network () {
 # パッケージのインストール
 # =====================================
 
+disable_enterprise_repository () {
+	if [ "${SETUP_DISABLE_ENTERPRISE_REPOSITORY}" != "true" ]; then
+		return 0
+	fi
+	# Proxmox Enterprise Repository ( CEPH ) の無効化
+	cat <<-EOF >> /etc/apt/sources.list.d/ceph.sources
+		Enabled: false
+	EOF
+	# Proxmox Enterprise Repository ( PVE ) の無効化
+	cat <<-EOF >> /etc/apt/sources.list.d/pve-enterprise.sources
+		Enabled: false
+	EOF
+	# Proxmox No-Subscription Repository の追加
+	cat <<-EOF > /etc/apt/sources.list.d/proxmox.sources
+		Types: deb
+		URIs: http://download.proxmox.com/debian/pve
+		Suites: trixie
+		Components: pve-no-subscription
+		Signed-By: /usr/share/keyrings/proxmox-archive-keyring.gpg
+	EOF
+}
+
 install_packages () {
+	if [ "${SETUP_CHANGE_DEBIAN_MIRROR}" = "true" ]; then
+		sed -i.org 's@http://deb.debian.org/debian/@'"${SETUP_DEBIAN_MIRROR_URL}"'@' /etc/apt/sources.list.d/debian.sources
+	fi
 	apt-get update
 	apt-get install openvswitch-switch corosync-qdevice -y
 }
@@ -805,6 +837,7 @@ setup_main() {
 	write_temp_network_configuration
 	restart_network
 	echo "Installing packages..."
+	disable_enterprise_repository
 	install_packages
 	echo "Downloding OpenWrt container image..."
 	download_image
