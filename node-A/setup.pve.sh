@@ -102,6 +102,11 @@ SETUP_SNIPPET_DIRECTORY="/var/lib/vz/snippets"
 # 引数 : OpenWrt VM の VM ID
 SETUP_OPENWRTS=("101" "102")
 
+# 引数 : Proxmox クラスターを作成するか
+SETUP_CREATE_CLUSTER=false
+# 引数 : クラスター作成時のクラスター名
+SETUP_CLUSTER_NAME="pve-cluster"
+
 # =====================================
 # 一時的に WAN へ接続できるようにする
 # 前提
@@ -836,6 +841,17 @@ enable_openflow_restore_service () {
 	systemctl enable apply-openflow.service
 }
 
+# =====================================
+# クラスターの作成 / 参加
+# =====================================
+
+create_cluster () {
+	if [ "${SETUP_CREATE_CLUSTER}" != "true" ]; then
+		return 0
+	fi
+	pvecm create "${SETUP_CLUSTER_NAME}" -link0 "${SETUP_PVE_MGMT_IPV4}"
+}
+
 setup_main() {
 	write_temp_network_configuration
 	restart_network
@@ -855,6 +871,8 @@ setup_main() {
 	write_etc_openvswitch_networks_conf
 	write_etc_hosts
 	enable_openflow_restore_service
+	restart_network
+	create_cluster
 	echo "Setup completed."
 	shutdown -r now
 }
