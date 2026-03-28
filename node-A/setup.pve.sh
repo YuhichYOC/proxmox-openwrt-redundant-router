@@ -34,6 +34,8 @@ SETUP_PVE_MGMT_CIDR="192.168.82.1/24"
 SETUP_PVE_MGMT_IPV4="192.168.82.1"
 # 引数 : この Proxmox ノードがインターネットアクセスにアクセスする IP アドレス ( CIDR )
 SETUP_PVE_INET_CIDR="192.168.101.251/24"
+# 引数 : OpenWrt のセットアップ完了時点でこのノードがインターネットアクセスするときのルーター IP アドレス = このノードのデフォルトゲートウェイ = 管理ネットワーク ( IP 直接指定 ) 以外へアクセスする際どちらへパケットを送信するか？
+SETUP_PVE_DEFAULT_GATEWAY="192.168.101.1"
 # 引数 : Proxmox クラスターに存在するノードの IP アドレス ( IPv4 )
 SETUP_CLUSTER_NODES=("192.168.82.1" "192.168.82.2" "192.168.82.3") # ノード 1, 2, QDevice
 
@@ -645,6 +647,7 @@ write_network_configuration () {
 		    ovs_type OVSIntPort
 		    ovs_bridge $SETUP_BR_PVEL3
 		    address $SETUP_PVE_INET_CIDR
+		    gateway $SETUP_PVE_DEFAULT_GATEWAY
 
 		# ===== パッチポート定義 =====
 
