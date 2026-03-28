@@ -22,7 +22,14 @@
 1. setup.pve.sh を実行
     - 自動でログアウトする
 1. setup.openwrt.sh を実行
-1. setup.suricata.sh を実行 ( Suricata が必要な場合のみ )
+1. Suricata が必要な場合
+    - setup.suricata.sh を実行
+1. Elasticsearch & Kibana が必要な場合
+    1. Ubuntu コンテナイメージダウンロードが完了しているか確認
+    1. SSL 証明書・鍵ファイルを準備
+        - [SSL 証明書取得方法の例はこちら](https://github.com/YuhichYOC/web-articles/blob/main/articles/proxmox-acme-client.md)
+    1. OpenWrt で Elasticsearch コンテナ NIC の固定 IP 設定・DNS レコード登録を済ませる
+    1. setup.elastic.pl を実行
 
 #### ノード B
 1. node-B/setup.pve.sh へ引数を記入
@@ -36,7 +43,8 @@
 1. setup.pve.sh を実行
     - 自動でログアウトする
 1. setup.openwrt.sh を実行
-1. setup.suricata.sh を実行 ( Suricata が必要な場合のみ )
+1. Suricata が必要な場合
+    - setup.suricata.sh を実行
 
 #### QDevice ノード
 1. qdev/setup.sh へ引数を記入
