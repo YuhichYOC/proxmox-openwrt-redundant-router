@@ -635,6 +635,9 @@ write_network_configuration () {
 		    ovs_type OVSBridge
 		    ovs_ports ${SETUP_PHYSICAL_LAN_PORTS[@]} $SETUP_PATCH_TO_LANL3
 		    up ovs-vsctl set Bridge \${IFACE} rstp_enable=true
+		    up ovs-vsctl set Bridge \${IFACE} other_config:rstp-forward-delay=3
+		    up ovs-vsctl set Bridge \${IFACE} other_config:rstp-max-age=10
+		    up ovs-vsctl set Bridge \${IFACE} other_config:rstp-hello-time=2
 
 		# ===== 2 段目 : L3 振り分け用ブリッジ =====
 		auto $SETUP_BR_L3
