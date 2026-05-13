@@ -106,6 +106,15 @@ SETUP_OPENWRTS=("101" "102")
 SETUP_CREATE_CLUSTER=false
 # 引数 : クラスター作成時のクラスター名
 SETUP_CLUSTER_NAME="pve-cluster"
+# 引数 : Proxmox クラスターに参加するか
+# 注意 : クラスター参加の自動化を Proxmox 公式は推奨していない
+SETUP_JOIN_CLUSTER=false
+# 引数 : クラスターのマスターノード IP アドレス
+SETUP_CLUSTER_MASTER_IPV4="192.168.82.1"
+# 引数 : クラスターのマスターノード名
+SETUP_CLUSTER_MASTER_NODENAME="test1pve1"
+# 引数 : クラスターのマスターノード root ユーザーパスワード
+SETUP_CLUSTER_MASTER_PASSWORD="cluster_root_password"
 
 # =====================================
 # 一時的に WAN へ接続できるようにする
@@ -186,7 +195,11 @@ install_packages () {
 		sed -i.org 's@http://deb.debian.org/debian/@'"${SETUP_DEBIAN_MIRROR_URL}"'@' /etc/apt/sources.list.d/debian.sources
 	fi
 	apt-get update
-	apt-get install openvswitch-switch corosync-qdevice -y
+	apt-get install openvswitch-switch iputils-arping corosync-qdevice -y
+
+	#if [ "${SETUP_JOIN_CLUSTER}" = "true" ]; then
+	#	apt-get install expect -y
+	#fi
 }
 
 # =====================================
@@ -680,6 +693,7 @@ write_network_configuration () {
 		    ovs_type OVSIntPort
 		    ovs_bridge $SETUP_BR_PVEL3
 		    address $SETUP_PVE_MGMT_CIDR
+			up arping -U -I \${IFACE} -c 3 $SETUP_PVE_MGMT_IPV4
 
 		# 家庭 LAN 用内部ポート
 		auto $SETUP_PVEL3_INET_PORT
@@ -824,6 +838,13 @@ write_etc_hosts () {
 	cat <<-EOF > /etc/hosts
 		127.0.0.1 localhost.localdomain localhost
 		$SETUP_PVE_MGMT_IPV4 $SETUP_NODENAME.$SETUP_DOMAIN $SETUP_NODENAME
+	EOF
+	if [ "${SETUP_JOIN_CLUSTER}" = "true" ]; then
+		cat <<-EOF >> /etc/hosts
+			$SETUP_CLUSTER_MASTER_IPV4 $SETUP_CLUSTER_MASTER_NODENAME.$SETUP_DOMAIN $SETUP_CLUSTER_MASTER_NODENAME
+		EOF
+	fi
+	cat <<-EOF >> /etc/hosts
 
 		# The following lines are desirable for IPv6 capable hosts
 
@@ -852,6 +873,42 @@ create_cluster () {
 	pvecm create "${SETUP_CLUSTER_NAME}" -link0 "${SETUP_PVE_MGMT_IPV4}"
 }
 
+join_cluster () {
+	if [ "${SETUP_JOIN_CLUSTER}" != "true" ]; then
+		return 0
+	fi
+	# クラスターのマスター側が応答するまでしばらく待つ
+	for i in {1..30}; do
+		echo "Waiting for cluster master ${SETUP_CLUSTER_MASTER_IPV4} to respond... ($i/30)"
+		if ping -c 1 -W 2 "${SETUP_CLUSTER_MASTER_IPV4}" > /dev/null 2>&1; then
+			break
+		fi
+	done
+	# 注意 : クラスター参加の自動化を Proxmox 公式は推奨していない。以下の処理を利用する場合、セキュリティ面でのリスクを理解した上で行うこと
+	# マスター側からの応答が無くてもクラスター参加を続行する。pvecm add コマンドの応答がない場合は手動でクラスターへ参加する必要がある
+	# 以下はクラスター参加コマンドの実行例, パスワードと yes の入力を自動化
+	# $ pvecm add 192.168.82.1 -link0 192.168.82.2
+	# Please enter superuser (root) password for '192.168.82.1': ************
+	# Establishing API connection with host '192.168.82.1'
+	# The authenticity of host '192.168.82.1' can't be established.
+	# X509 SHA256 key fingerprint is xx:xx:xx:xx:xx:xx:xx:xx:xx:xx:xx:xx:xx:xx:xx:xx:xx:xx:xx:xx:xx:xx:xx:xx:xx:xx:xx:xx:xx:xx:xx:xx.
+	# Are you sure you want to continue connecting (yes/no)? yes
+	# Login succeeded.
+	#expect <<-EOF
+	#	set timeout 10
+	#	spawn pvecm add "${SETUP_CLUSTER_MASTER_IPV4}" -link0 "${SETUP_PVE_MGMT_IPV4}"
+	#	expect "password for '${SETUP_CLUSTER_MASTER_IPV4}':"
+	#	send "${SETUP_CLUSTER_MASTER_PASSWORD}\r"
+	#	expect "Are you sure you want to continue connecting (yes/no)?"
+	#	send "yes\r"
+	#	expect eof
+	#EOF
+	pvecm add "${SETUP_CLUSTER_MASTER_IPV4}" -link0 "${SETUP_PVE_MGMT_IPV4}" <<-EOF
+		"${SETUP_CLUSTER_MASTER_PASSWORD}"
+		yes
+	EOF
+}
+
 setup_main() {
 	write_temp_network_configuration
 	restart_network
@@ -873,6 +930,7 @@ setup_main() {
 	enable_openflow_restore_service
 	restart_network
 	create_cluster
+	join_cluster
 	echo "Setup completed."
 	shutdown -r now
 }
