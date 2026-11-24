@@ -1,0 +1,159 @@
+#!/bin/sh /etc/rc.common
+
+# /etc/init.d/network が START=20, network より先に実行する
+START=19
+
+# 引数 : OpenWrt VM の名前
+SETUP_NODENAME="test1wrt2"
+# 引数 : OpenWrt VM が WAN 側と接続する NIC の MAC アドレス
+SETUP_PHYSICAL_WAN_PORT_MACADDR="02:50:58:00:00:02"
+# 引数 : OpenWrt VM が VRRP で利用する NIC の MAC アドレス
+SETUP_PHYSICAL_VRRP_PORT_MACADDR="02:50:58:00:04:02"
+# 引数 : OpenWrt VM がインターネットアクセス提供用に使用する NIC の MAC アドレス
+SETUP_PHYSICAL_INET_PORT_MACADDR="02:50:58:00:05:02"
+# 引数 : VRRP 用 NIC の IP アドレス
+SETUP_VRRP_IPV4="192.168.92.3"
+# 引数 : インターネットアクセス提供用 NIC の IP アドレス
+SETUP_LAN_IPV4="192.168.101.3"
+# 引数 : インターネットアクセス提供用仮想ルーターの IP アドレス ( CIDR )
+SETUP_VIRTUAL_ROUTER_CIDR="192.168.101.1/24"
+# 引数 : インターネットアクセス提供用仮想ルーターの IP アドレス ( IPv4 )
+SETUP_VIRTUAL_ROUTER_IPV4="192.168.101.1"
+
+# 引数 : この OpenWrt ノードの VRRP での初期状態, 2 番目のノードを BACKUP とする
+SETUP_ROUTER_STATE="BACKUP"
+# 引数 : この OpenWrt ノードの VRRP での初期優先度
+SETUP_ROUTER_PRIORITY="100"
+# 引数 : インターネットアクセス提供用仮想ルーターの ID
+SETUP_VIRTUAL_ROUTER_ID="51"
+# 引数 : VRRP で利用するパスワード
+# パスワード生成用コマンドの例 : openssl rand -base64 8 | cut -c1-8
+SETUP_VRRP_PASSWORD="password"
+
+find_nic_name () {
+	local mac_addr=$1
+	for device in /sys/class/net/*; do
+		if [ -e "${device}/device" ] && [ "$(cat "${device}/address")" = "${mac_addr}" ]; then
+			echo "${device##*/}"
+		fi
+	done
+}
+
+init_etc_config_network () {
+	local wan_port_name=$(find_nic_name $SETUP_PHYSICAL_WAN_PORT_MACADDR)
+	local vrrp_port_name=$(find_nic_name $SETUP_PHYSICAL_VRRP_PORT_MACADDR)
+	local lan_port_name=$(find_nic_name $SETUP_PHYSICAL_INET_PORT_MACADDR)
+
+	cat <<-EOF > /etc/config/network
+		config interface 'loopback'
+		    option ifname 'lo'
+		    option proto 'static'
+		    option ipaddr '127.0.0.1'
+		    option netmask '255.0.0.0'
+
+		config interface 'wan'
+		    option device '${wan_port_name}'
+		    option proto 'dhcp'
+
+		config interface 'wan6'
+		    option device '${wan_port_name}'
+		    option proto 'dhcpv6'
+
+		config interface 'vrrp'
+		    option device '${vrrp_port_name}'
+		    option proto 'static'
+		    option ipaddr '${SETUP_VRRP_IPV4}'
+		    option netmask '255.255.255.0'
+
+		config interface 'lan'
+		    option device '${lan_port_name}'
+		    option proto 'static'
+		    option ipaddr '${SETUP_LAN_IPV4}'
+		    option netmask '255.255.255.0'
+
+	EOF
+
+	awk '/config globals .globals./, /^$/ { print }' /etc/config/network.org >> /etc/config/network
+}
+
+init_etc_keepalived_keepalived_conf () {
+	local vrrp_port_name=$(find_nic_name $SETUP_PHYSICAL_VRRP_PORT_MACADDR)
+	local lan_port_name=$(find_nic_name $SETUP_PHYSICAL_INET_PORT_MACADDR)
+
+	cat <<-EOF > /etc/keepalived/keepalived.conf
+		! Configuration File for keepalived
+
+		global_defs {
+		    router_id $SETUP_NODENAME
+		    vrrp_version 2
+		    vrrp_garp_master_delay 1
+		    vrrp_garp_master_repeat 3
+		    vrrp_skip_check_adv_addr
+		    # VRRP プロトコル厳密準拠を強制しない
+		    #vrrp_strict
+		    # nftables ルールを作成しない
+		    vrrp_iptables
+		    vrrp_garp_interval 0
+		    vrrp_gna_interval 0
+		}
+
+		vrrp_script check_internet {
+		    script "/usr/bin/ping -c 2 -W 2 8.8.8.8"
+		    interval 5
+		    weight -50
+		    fall 2
+		    rise 2
+		}
+
+		vrrp_instance VI_1 {
+		    state $SETUP_ROUTER_STATE
+		    interface $vrrp_port_name
+		    virtual_router_id $SETUP_VIRTUAL_ROUTER_ID
+		    priority $SETUP_ROUTER_PRIORITY
+		    advert_int 1
+
+		    # VIP トラフィックを許可
+		    accept
+
+		    authentication {
+		        auth_type PASS
+		        auth_pass $SETUP_VRRP_PASSWORD
+		    }
+
+		    virtual_ipaddress {
+		        $SETUP_VIRTUAL_ROUTER_CIDR dev $lan_port_name
+		    }
+
+		    track_script {
+		        check_internet
+		    }
+
+		    notify_master "/etc/keepalived/notify-master.sh"
+		    notify_backup "/etc/keepalived/notify-backup.sh"
+		    notify_fault "/etc/keepalived/notify-fault.sh"
+		}
+	EOF
+}
+
+init_etc_keepalived_notify_master_sh () {
+	local lan_port_name=$(find_nic_name $SETUP_PHYSICAL_INET_PORT_MACADDR)
+
+	cat <<-EOF > /etc/keepalived/notify-master.sh
+		#!/bin/sh
+		logger -t keepalived "$SETUP_NODENAME became MASTER"
+		/etc/init.d/firewall restart
+		arping -c 3 -A -I $lan_port_name $SETUP_VIRTUAL_ROUTER_IPV4 &
+	EOF
+
+	chmod +x /etc/keepalived/notify-master.sh
+}
+
+init_main () {
+	init_etc_config_network
+	init_etc_keepalived_keepalived_conf
+	init_etc_keepalived_notify_master_sh
+}
+
+start () {
+	init_main "$@"
+}
