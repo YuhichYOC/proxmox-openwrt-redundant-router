@@ -1,7 +1,15 @@
 #!/usr/bin/perl
 use strict;
 use warnings;
+use utf8;
+use FindBin;
+use lib "$FindBin::Bin/lib";
+use IO::Handle;
 use File::Glob ':glob';
+use File::Temp qw(tempfile);
+use SetupConfig qw(load_config cfg dump_toml);
+
+STDOUT->autoflush(1);
 
 # 前提条件 1. victorialogs コンテナの固定 IP 設定と名前解決が DNS サーバーで済んでいること
 #
@@ -13,34 +21,28 @@ use File::Glob ':glob';
 # Debian 13 コンテナイメージがダウンロードされていない場合は pveam で最新の debian-13-standard をダウンロードする
 
 # =====================================
-# ノード A : victorialogs 設定
+# 設定の読み込み ( 値は config.toml の [victorialogs] / [victorialogs.guest] へ記入する )
 # =====================================
 
-# 引数 : コンテナイメージを保存する Proxmox ストレージ ID
-my $SETUP_IMAGE_STORAGE_ID = "local";
-# 引数 : コンテナイメージの保存先ディレクトリ
-my $SETUP_IMAGE_DIRECTORY = "/var/lib/vz/template/cache";
-# 引数 : 使用する Debian のバージョン
-my $SETUP_DEBIAN_VERSION = "13";
-# 引数 : メモリサイズ
-my $SETUP_MEMORY_SIZE = "2048"; # MiB
-# 引数 : スワップサイズ
-my $SETUP_SWAP_SIZE = "1024"; # MiB
-# 引数 : CPU コア数
-my $SETUP_CPU_CORES = "2";
+my $CONFIG_PATH = $ARGV[0] // "$FindBin::Bin/config.toml";
+my $C = load_config($CONFIG_PATH);
 
-# 引数 : VictoriaLogs コンテナの ID
-my $SETUP_CONTAINER_ID = "141";
-# 引数 : VictoriaLogs コンテナの名前
-my $SETUP_CONTAINER_NAME = "victorialogs";
-# 引数 : VictoriaLogs コンテナのディスクを配置するストレージ ID
-my $SETUP_DISK_STORAGE_ID = "local-lvm";
-# 引数 : VictoriaLogs コンテナのディスクサイズ ( GiB ) , Elasticsearch の 10 分の 1 から運用開始
-my $SETUP_DISK_SIZE = "30";
-# 引数 : VictoriaLogs コンテナが LAN と接続する OVS 仮想ブリッジの名前
-my $SETUP_BR_INET = "br5_inet";
-# 引数 : VictoriaLogs コンテナの NIC が持つ MAC アドレス
-my $SETUP_NIC_MACADDR = "02:50:58:00:05:05";
+my $SETUP_IMAGE_STORAGE_ID = cfg($C, "victorialogs.image_storage_id");
+my $SETUP_IMAGE_DIRECTORY = cfg($C, "victorialogs.image_directory");
+my $SETUP_DEBIAN_VERSION = cfg($C, "victorialogs.debian_version");
+my $SETUP_MEMORY_SIZE = cfg($C, "victorialogs.memory_size");
+my $SETUP_SWAP_SIZE = cfg($C, "victorialogs.swap_size");
+my $SETUP_CPU_CORES = cfg($C, "victorialogs.cpu_cores");
+
+my $SETUP_CONTAINER_ID = cfg($C, "victorialogs.container_id");
+my $SETUP_CONTAINER_NAME = cfg($C, "victorialogs.container_name");
+my $SETUP_DISK_STORAGE_ID = cfg($C, "victorialogs.disk_storage_id");
+my $SETUP_DISK_SIZE = cfg($C, "victorialogs.disk_size");
+my $SETUP_BR_INET = cfg($C, "pve.br_inet");
+my $SETUP_NIC_MACADDR = cfg($C, "victorialogs.nic_macaddr");
+
+# コンテナへ送り込むファイルの配置先 ( セットアップ完了後に削除する )
+my $GUEST_WORK_DIR = "/root/setup";
 
 # =====================================
 # ユーティリティ
@@ -130,20 +132,30 @@ sub wait_for_nic_up {
     }
 }
 
-sub push_environment_edit_script {
-    push_or_die("victorialogs/setup1.pl", "/root/setup1.pl", "root:root", "744");
+sub push_setup_files {
+    # [victorialogs.guest] だけを切り出して渡す ( VRRP パスワードなど他の設定をコンテナへ持ち込まない )
+    my ($fh, $guest_config) = tempfile(UNLINK => 1);
+    binmode($fh, ':encoding(UTF-8)');
+    $fh->print(dump_toml(cfg($C, "victorialogs.guest")));
+    close($fh);
+
+    run_cmd_or_die("pct", "exec", $SETUP_CONTAINER_ID, "--", "mkdir", "-p", "$GUEST_WORK_DIR/lib");
+    push_or_die("$FindBin::Bin/victorialogs/setup1.pl", "$GUEST_WORK_DIR/setup1.pl", "root:root", "744");
+    push_or_die("$FindBin::Bin/victorialogs/setup2.pl", "$GUEST_WORK_DIR/setup2.pl", "root:root", "744");
+    push_or_die("$FindBin::Bin/lib/SetupConfig.pm", "$GUEST_WORK_DIR/lib/SetupConfig.pm", "root:root", "644");
+    push_or_die($guest_config, "$GUEST_WORK_DIR/config.toml", "root:root", "600");
 }
 
 sub run_environment_edit_script {
-    run_cmd_or_die("pct exec $SETUP_CONTAINER_ID -- /usr/bin/perl /root/setup1.pl > /root/setup.victorialogs-$SETUP_CONTAINER_ID-setup1.log 2>&1");
-}
-
-sub push_victorialogs_install_script {
-    push_or_die("victorialogs/setup2.pl", "/root/setup2.pl", "root:root", "744");
+    run_cmd_or_die("pct exec $SETUP_CONTAINER_ID -- /usr/bin/perl $GUEST_WORK_DIR/setup1.pl $GUEST_WORK_DIR/config.toml > /root/setup.victorialogs-$SETUP_CONTAINER_ID-setup1.log 2>&1");
 }
 
 sub run_victorialogs_install_script {
-    run_cmd_or_die("pct exec $SETUP_CONTAINER_ID -- /usr/bin/perl /root/setup2.pl > /root/setup.victorialogs-$SETUP_CONTAINER_ID-setup2.log 2>&1");
+    run_cmd_or_die("pct exec $SETUP_CONTAINER_ID -- /usr/bin/perl $GUEST_WORK_DIR/setup2.pl $GUEST_WORK_DIR/config.toml > /root/setup.victorialogs-$SETUP_CONTAINER_ID-setup2.log 2>&1");
+}
+
+sub remove_setup_files {
+    run_cmd_or_die("pct", "exec", $SETUP_CONTAINER_ID, "--", "rm", "-rf", $GUEST_WORK_DIR);
 }
 
 sub setup_main {
@@ -151,10 +163,10 @@ sub setup_main {
     create_container();
     start_victorialogs_container();
     wait_for_nic_up();
-    push_environment_edit_script();
+    push_setup_files();
     run_environment_edit_script();
-    push_victorialogs_install_script();
     run_victorialogs_install_script();
+    remove_setup_files();
 }
 
 setup_main();

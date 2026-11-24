@@ -1,0 +1,255 @@
+# =====================================
+# ノード A 設定ファイル
+# =====================================
+# このノードで実行する全スクリプト ( setup.*.pl ) がこのファイルを読み込む
+# 複数のスクリプトで使う値 ( ブリッジ名・MAC アドレスなど ) は 1 か所にだけ記入する
+
+# =====================================
+# Proxmox ノード ( setup.pve.pl )
+# =====================================
+[pve]
+# この Proxmox ノードを識別する番号
+node_number = 1
+# この Proxmox ノードの名前
+nodename = "test1pve1"
+# 使用するドメインの名前
+domain = "lan"
+
+# このノードで稼働する OpenWrt VM が WAN 側の NIC として利用する物理 NIC
+physical_wan_port = "ens33"
+# このノードで稼働する OpenWrt VM が LAN 側の NIC として利用する物理 NIC
+physical_lan_ports = ["ens34", "ens35"]
+
+# Enterprise Repository を無効化するか
+disable_enterprise_repository = false
+# Debian ミラーリポジトリの指定を変更するか
+change_debian_mirror = false
+# Debian ミラーリポジトリの URL
+debian_mirror_url = "http://ftp.jp.debian.org/debian/"
+
+# Proxmox ノードセットアップ中に一時的に利用するルーターの IP アドレス
+temporary_gateway = "192.168.200.1"
+# Proxmox ノード管理 & クラスターネットワークの先頭 3 オクテット ( ネットワークは <先頭 3 オクテット>.0/24 になる )
+mgmt_net_prefix = "192.168.82"
+# OpenWrt が VRRP で利用するネットワーク
+vrrp_net = "192.168.92.0/24"
+# OpenWrt がインターネットアクセスを提供する LAN ネットワーク
+inet_net = "192.168.101.0/24"
+
+# この Proxmox ノードが管理 & クラスターで使用する IP アドレス ( CIDR )
+pve_mgmt_cidr = "192.168.82.1/24"
+# この Proxmox ノードが管理 & クラスターで使用する IP アドレス ( IPv4 )
+pve_mgmt_ipv4 = "192.168.82.1"
+# この Proxmox ノードがインターネットアクセスにアクセスする IP アドレス ( CIDR )
+pve_inet_cidr = "192.168.101.251/24"
+# OpenWrt のセットアップ完了時点でこのノードがインターネットアクセスするときのルーター IP アドレス = このノードのデフォルトゲートウェイ
+pve_default_gateway = "192.168.101.1"
+# Proxmox クラスターに存在するノードの IP アドレス ( IPv4 ) : ノード 1, 2, QDevice
+cluster_nodes = ["192.168.82.1", "192.168.82.2", "192.168.82.3"]
+
+# WAN 側ブリッジ ( WAN ⇔ OpenWrt ) の名前
+br_wan = "br0_wan"
+# LAN 側 L2 ブリッジの名前
+br_l2 = "br1_lanl2"
+# LAN 側 L3 ブリッジの名前
+br_l3 = "br2_lanl3"
+# Proxmox 管理用 L2 ブリッジの名前
+br_mgmt = "br3_mgmt"
+# VRRP 用 L2 ブリッジの名前
+br_vrrp = "br4_vrrp"
+# インターネットアクセス提供用 L2 ブリッジの名前
+br_inet = "br5_inet"
+# Proxmox 専用 L3 ブリッジの名前
+br_pvel3 = "br6_pvel3"
+
+# Proxmox 管理用 OVS 内部インターフェースの名前
+pvel3_mgmt_port = "mgmt0"
+# Proxmox がインターネットへアクセスするための内部インターフェースの名前
+pvel3_inet_port = "inet0"
+# LAN 側 L2 ブリッジ から LAN 側 L3 ブリッジ への OVS ピアポートの名前
+patch_to_lanl3 = "p-to-lanl3"
+# LAN 側 L3 ブリッジ から LAN 側 L2 ブリッジ への OVS ピアポートの名前
+patch_from_lanl3 = "p-from-lanl3"
+# LAN 側 L3 ブリッジ から Proxmox 管理用 L2 ブリッジ への OVS ピアポートの名前
+patch_to_mgmt = "p-to-mgmt"
+# Proxmox 管理用 L2 ブリッジ から LAN 側 L3 ブリッジ への OVS ピアポートの名前
+patch_from_mgmt = "p-from-mgmt"
+# LAN 側 L3 ブリッジ から VRRP 用 L2 ブリッジ への OVS ピアポートの名前
+patch_to_vrrp = "p-to-vrrp"
+# VRRP 用 L2 ブリッジ から LAN 側 L3 ブリッジ への OVS ピアポートの名前
+patch_from_vrrp = "p-from-vrrp"
+# LAN 側 L3 ブリッジ から インターネットアクセス提供用 L2 ブリッジ への OVS ピアポートの名前
+patch_to_inet = "p-to-inet"
+# インターネットアクセス提供用 L2 ブリッジ から LAN 側 L3 ブリッジ への OVS ピアポートの名前
+patch_from_inet = "p-from-inet"
+# Proxmox 管理用 L2 ブリッジ から Proxmox 専用 L3 ブリッジ への OVS ピアポートの名前
+patch_to_pvel3_mgmt = "p-to-pvel3m"
+# Proxmox 専用 L3 ブリッジ から Proxmox 管理用 L2 ブリッジ への OVS ピアポートの名前
+patch_from_pvel3_mgmt = "p-from-pvel3m"
+# インターネットアクセス提供用 L2 ブリッジ から Proxmox 専用 L3 ブリッジ への OVS ピアポートの名前
+patch_to_pvel3_inet = "p-to-pvel3i"
+# Proxmox 専用 L3 ブリッジ から インターネットアクセス提供用 L2 ブリッジ への OVS ピアポートの名前
+patch_from_pvel3_inet = "p-from-pvel3i"
+
+# OpenWrt VM ディスクイメージのダウンロード URL ( バージョンは [openwrt] の version と合わせる )
+openwrt_image_url = "https://downloads.openwrt.org/releases/24.10.5/targets/x86/64/openwrt-24.10.5-x86-64-generic-ext4-combined-efi.img.gz"
+# スニペットディレクトリのパス
+snippet_directory = "/var/lib/vz/snippets"
+
+# クラスター内の OpenWrt VM の VM ID
+openwrts = ["101", "102"]
+
+# Proxmox クラスターを作成するか
+create_cluster = false
+# クラスター作成時のクラスター名
+cluster_name = "pve-cluster"
+
+# =====================================
+# OpenWrt VM : ホスト側 ( setup.openwrt.pl )
+# =====================================
+[openwrt]
+# 使用する OpenWrt のバージョン
+version = "24.10.5"
+# OpenWrt VM ID
+vm_id = "101"
+# OpenWrt VM の名前 ( OpenWrt 内のホスト名・VRRP の router_id にも使う )
+vm_name = "test1wrt1"
+# OpenWrt フックスクリプトの配置場所
+snippet = "local:snippets/openwrt-hook.sh"
+# OpenWrt VM が WAN 側と接続する NIC の MAC アドレス ( 接続先は [pve] の br_wan )
+wan_macaddr = "02:50:58:00:00:01"
+# OpenWrt VM が VRRP で利用する NIC の MAC アドレス ( 接続先は [pve] の br_vrrp )
+vrrp_macaddr = "02:50:58:00:04:01"
+# OpenWrt VM がインターネットアクセス提供用に使用する NIC の MAC アドレス ( 接続先は [pve] の br_inet )
+inet_macaddr = "02:50:58:00:05:01"
+# OpenWrt VM のディスクを配置するストレージ ID
+disk_storage_id = "local-lvm"
+
+# =====================================
+# OpenWrt VM : VM 内部 ( openwrt/setup.sh, openwrt/init_interfaces )
+# =====================================
+# setup.openwrt.pl がこのテーブルからシェル変数ファイル /etc/openwrt-setup.conf を生成して VM へ配置する
+[openwrt.guest]
+# 使用するドメインの名前
+lan_domain_name = "lan"
+
+# VRRP で死活監視を行う宛先の OpenWrt VM の IP アドレス
+vrrp_peer_ipv4 = "192.168.92.3"
+# VRRP で死活監視を行う宛先の OpenWrt VM の名前
+vrrp_peer_hostname = "test1wrt2"
+
+# ファイアウォールで VRRP 用として通信を許可するルールの名前
+vrrp_allow_peer_rule_name = "Allow-VRRP-from-peer"
+# ファイアウォールで VRRP ネットワーク外から VRRP ネットワークに侵入するパケットを拒否するルールの名前
+vrrp_deny_other_rule_name = "Drop-other-VRRP"
+# ファイアウォールで Proxmox 管理ネットワーク外から Proxmox 管理 & クラスターネットワークに侵入するパケットを拒否するルールの名前
+mgmt_block_rule_name = "Block-to-Proxmox-Management"
+
+# VRRP 用 NIC の IP アドレス
+vrrp_ipv4 = "192.168.92.2"
+# インターネットアクセス提供用 NIC の IP アドレス
+lan_ipv4 = "192.168.101.2"
+# インターネットアクセス提供用仮想ルーターの IP アドレス ( CIDR )
+virtual_router_cidr = "192.168.101.1/24"
+# インターネットアクセス提供用仮想ルーターの IP アドレス ( IPv4 )
+virtual_router_ipv4 = "192.168.101.1"
+
+# この OpenWrt ノードの VRRP での初期状態, 1 番目のノードを MASTER とする
+router_state = "MASTER"
+# この OpenWrt ノードの VRRP での初期優先度
+router_priority = "150"
+# インターネットアクセス提供用仮想ルーターの ID
+virtual_router_id = "51"
+# VRRP で利用するパスワード ( ノード A / B で同じ値にする )
+# パスワード生成用コマンドの例 : openssl rand -base64 8 | cut -c1-8
+vrrp_password = "password"
+
+# =====================================
+# Suricata コンテナ : ホスト側 ( setup.suricata.pl )
+# =====================================
+[suricata]
+# Ubuntu コンテナイメージのダウンロード URL
+ubuntu_image_url = "https://images.linuxcontainers.org/images/ubuntu/noble/amd64/default/20260220_07:42/rootfs.tar.xz"
+# コンテナイメージの保存先ディレクトリ
+image_directory = "/var/lib/vz/template/cache"
+# 使用する Ubuntu のバージョン
+ubuntu_version = "24.04"
+
+# Suricata コンテナの ID
+container_id = "121"
+# Suricata コンテナの名前
+container_name = "suricata1"
+# Suricata コンテナフックスクリプトの配置場所 ( Proxmox ストレージ形式 , 実ディレクトリは [pve] の snippet_directory )
+snippet = "local:snippets/suricata-hook.sh"
+
+# 監視対象 WAN 側 NIC の MAC アドレス ( 接続先は [pve] の br_wan , 監視対象物理 NIC は [pve] の physical_wan_port )
+wan_macaddr = "02:50:58:00:00:03"
+# LAN 側 NIC の MAC アドレス ( 接続先は [pve] の br_inet )
+lan_macaddr = "02:50:58:00:05:03"
+# パケットスニッフィングのために作成する OVS ミラーの名前
+mirror_name = "br0_m0"
+
+# =====================================
+# Suricata コンテナ : コンテナ内部 ( suricata/setup.pl )
+# =====================================
+[suricata.guest]
+# タイムゾーン
+timezone = "Asia/Tokyo"
+# Ubuntu リポジトリミラー
+ubuntu_mirror_url = "jp.archive.ubuntu.com"
+# WAN 側ネットワーク
+wan_net = "192.168.0.0/24"
+# 使用する Suricata のルールの名前
+enable_suricata_rule_name = "et/open"
+
+# =====================================
+# VictoriaLogs コンテナ : ホスト側 ( setup.victorialogs.pl )
+# =====================================
+[victorialogs]
+# コンテナイメージを保存する Proxmox ストレージ ID
+image_storage_id = "local"
+# コンテナイメージの保存先ディレクトリ
+image_directory = "/var/lib/vz/template/cache"
+# 使用する Debian のバージョン
+debian_version = "13"
+# メモリサイズ ( MiB )
+memory_size = "2048"
+# スワップサイズ ( MiB )
+swap_size = "1024"
+# CPU コア数
+cpu_cores = "2"
+
+# VictoriaLogs コンテナの ID
+container_id = "141"
+# VictoriaLogs コンテナの名前
+container_name = "victorialogs"
+# VictoriaLogs コンテナのディスクを配置するストレージ ID
+disk_storage_id = "local-lvm"
+# VictoriaLogs コンテナのディスクサイズ ( GiB ) , Elasticsearch の 10 分の 1 から運用開始
+disk_size = "30"
+# VictoriaLogs コンテナの NIC が持つ MAC アドレス ( 接続先は [pve] の br_inet )
+nic_macaddr = "02:50:58:00:05:05"
+
+# =====================================
+# VictoriaLogs コンテナ : コンテナ内部 ( victorialogs/setup1.pl, victorialogs/setup2.pl )
+# =====================================
+[victorialogs.guest]
+# タイムゾーン
+timezone = "Asia/Tokyo"
+# Debian リポジトリミラー URL
+debian_mirror_url = "http://ftp.jp.debian.org/debian"
+# VictoriaLogs のバージョン
+version = "v1.51.0"
+# VictoriaLogs の実行ユーザー名
+user = "victorialogs"
+# VictoriaLogs のバイナリ配置ディレクトリ
+bin_dir = "/opt/victorialogs"
+# VictoriaLogs のデータ保存ディレクトリ
+data_dir = "/var/lib/victorialogs"
+# ログの保存期間
+retention_period = "30d"
+# VictoriaLogs の HTTP API ( 取り込み・検索・Web UI ) が待ち受けるポート番号
+http_port = 9428
+# VictoriaLogs の syslog リスナー ( TCP ) が待ち受けるポート番号
+# 非特権コンテナでは 1024 番未満のポートを一般ユーザーが利用できないため、syslog で使うポートを 5140 番にする
+syslog_tcp_port = 5140

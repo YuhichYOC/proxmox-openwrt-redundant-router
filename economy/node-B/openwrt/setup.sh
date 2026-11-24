@@ -2,28 +2,12 @@
 set -e
 
 # =====================================
-# ノード B : test1wrt2 設定
+# 設定の読み込み
 # =====================================
 
-# 引数 : OpenWrt VM の名前
-SETUP_NODENAME="test1wrt2"
-
-# 引数 : Proxmox ノード管理 & クラスターネットワーク
-SETUP_MGMT_NET="192.168.82.0/24"
-# 引数 : 使用するドメインの名前
-SETUP_LAN_DOMAIN_NAME="lan"
-
-# 引数 : VRRP で死活監視を行う宛先の OpenWrt VM の IP アドレス
-SETUP_VRRP_PEER_IPV4="192.168.92.2"
-# 引数 : VRRP で死活監視を行う宛先の OpenWrt VM の名前
-SETUP_VRRP_PEER_HOSTNAME="test1wrt1"
-
-# 引数 : ファイアウォールで VRRP 用として通信を許可するルールの名前
-SETUP_VRRP_ALLOW_PEER_RULE_NAME="Allow-VRRP-from-peer"
-# 引数 : ファイアウォールで VRRP ネットワーク外から VRRP ネットワークに侵入するパケットを拒否するルールの名前
-SETUP_VRRP_DENY_OTHER_RULE_NAME="Drop-other-VRRP"
-# 引数 : ファイアウォールで Proxmox 管理ネットワーク外から Proxmox 管理 & クラスターネットワークに侵入するパケットを拒否するルールの名前
-SETUP_MGMT_BLOCK_RULE_NAME="Block-to-Proxmox-Management"
+# 設定値はホスト側 config.toml の [openwrt.guest] へ記入する
+# setup.openwrt.pl が config.toml から /etc/openwrt-setup.conf を生成してディスクイメージへ配置する
+. "/etc/openwrt-setup.conf"
 
 . "/etc/init.d/init_interfaces"
 

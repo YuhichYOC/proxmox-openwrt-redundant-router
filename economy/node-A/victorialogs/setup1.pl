@@ -1,16 +1,23 @@
 #!/usr/bin/perl
 use strict;
 use warnings;
+use utf8;
+use FindBin;
+use lib "$FindBin::Bin/lib", "$FindBin::Bin/../lib";
 use IO::Handle;
+use SetupConfig qw(load_config cfg);
 
 # =====================================
-# ノード A : victorialogs 設定
+# VictoriaLogs コンテナ内部の設定
 # =====================================
+# setup.victorialogs.pl が config.toml の [victorialogs.guest] だけを切り出した TOML を作成し、引数として渡す
+# 使い方 : perl setup1.pl <設定ファイル>
 
-# 引数 : タイムゾーン
-my $SETUP_TIMEZONE = "Asia/Tokyo";
-# 引数 : Debian リポジトリミラー URL
-my $SETUP_DEBIAN_MIRROR_URL = "http://ftp.jp.debian.org/debian";
+my $CONFIG_PATH = $ARGV[0] // die "Usage: $0 <config.toml>\n";
+my $C = load_config($CONFIG_PATH);
+
+my $SETUP_TIMEZONE = cfg($C, "timezone");
+my $SETUP_DEBIAN_MIRROR_URL = cfg($C, "debian_mirror_url");
 
 # =====================================
 # ユーティリティ

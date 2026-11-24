@@ -1,0 +1,886 @@
+#!/usr/bin/perl
+use strict;
+use warnings;
+use utf8;
+use FindBin;
+use lib "$FindBin::Bin/lib";
+use IO::Handle;
+use File::Copy;
+use File::Path qw(make_path);
+use POSIX qw(strftime);
+use SetupConfig qw(load_config cfg);
+
+STDOUT->autoflush(1);
+
+# =====================================
+# 設定の読み込み ( 値は config.toml の [pve] / [openwrt] へ記入する )
+# =====================================
+
+my $CONFIG_PATH = $ARGV[0] // "$FindBin::Bin/config.toml";
+my $C = load_config($CONFIG_PATH);
+
+my $SETUP_NODE_NUMBER = cfg($C, "pve.node_number");
+my $SETUP_NODENAME = cfg($C, "pve.nodename");
+my $SETUP_DOMAIN = cfg($C, "pve.domain");
+
+my $SETUP_PHYSICAL_WAN_PORT = cfg($C, "pve.physical_wan_port");
+my @SETUP_PHYSICAL_LAN_PORTS = @{cfg($C, "pve.physical_lan_ports")};
+
+my $SETUP_DISABLE_ENTERPRISE_REPOSITORY = cfg($C, "pve.disable_enterprise_repository");
+my $SETUP_CHANGE_DEBIAN_MIRROR = cfg($C, "pve.change_debian_mirror");
+my $SETUP_DEBIAN_MIRROR_URL = cfg($C, "pve.debian_mirror_url");
+
+my $SETUP_TEMPORARY_GATEWAY = cfg($C, "pve.temporary_gateway");
+my $SETUP_MGMT_NET_PREFIX = cfg($C, "pve.mgmt_net_prefix");
+my $SETUP_MGMT_NET = "${SETUP_MGMT_NET_PREFIX}.0/24";
+my $SETUP_VRRP_NET = cfg($C, "pve.vrrp_net");
+my $SETUP_INET_NET = cfg($C, "pve.inet_net");
+
+my $SETUP_PVE_MGMT_CIDR = cfg($C, "pve.pve_mgmt_cidr");
+my $SETUP_PVE_MGMT_IPV4 = cfg($C, "pve.pve_mgmt_ipv4");
+my $SETUP_PVE_INET_CIDR = cfg($C, "pve.pve_inet_cidr");
+my $SETUP_PVE_DEFAULT_GATEWAY = cfg($C, "pve.pve_default_gateway");
+my @SETUP_CLUSTER_NODES = @{cfg($C, "pve.cluster_nodes")};
+
+my $SETUP_BR_WAN = cfg($C, "pve.br_wan");
+my $SETUP_BR_L2 = cfg($C, "pve.br_l2");
+my $SETUP_BR_L3 = cfg($C, "pve.br_l3");
+my $SETUP_BR_MGMT = cfg($C, "pve.br_mgmt");
+my $SETUP_BR_VRRP = cfg($C, "pve.br_vrrp");
+my $SETUP_BR_INET = cfg($C, "pve.br_inet");
+my $SETUP_BR_PVEL3 = cfg($C, "pve.br_pvel3");
+
+my $SETUP_PVEL3_MGMT_PORT = cfg($C, "pve.pvel3_mgmt_port");
+my $SETUP_PVEL3_INET_PORT = cfg($C, "pve.pvel3_inet_port");
+my $SETUP_PATCH_TO_LANL3 = cfg($C, "pve.patch_to_lanl3");
+my $SETUP_PATCH_FROM_LANL3 = cfg($C, "pve.patch_from_lanl3");
+my $SETUP_PATCH_TO_MGMT = cfg($C, "pve.patch_to_mgmt");
+my $SETUP_PATCH_FROM_MGMT = cfg($C, "pve.patch_from_mgmt");
+my $SETUP_PATCH_TO_VRRP = cfg($C, "pve.patch_to_vrrp");
+my $SETUP_PATCH_FROM_VRRP = cfg($C, "pve.patch_from_vrrp");
+my $SETUP_PATCH_TO_INET = cfg($C, "pve.patch_to_inet");
+my $SETUP_PATCH_FROM_INET = cfg($C, "pve.patch_from_inet");
+my $SETUP_PATCH_TO_PVEL3_MGMT = cfg($C, "pve.patch_to_pvel3_mgmt");
+my $SETUP_PATCH_FROM_PVEL3_MGMT = cfg($C, "pve.patch_from_pvel3_mgmt");
+my $SETUP_PATCH_TO_PVEL3_INET = cfg($C, "pve.patch_to_pvel3_inet");
+my $SETUP_PATCH_FROM_PVEL3_INET = cfg($C, "pve.patch_from_pvel3_inet");
+
+my $SETUP_OPENWRT_IMAGE_URL = cfg($C, "pve.openwrt_image_url");
+my $SETUP_OPENWRT_VERSION = cfg($C, "openwrt.version");
+# セットアップ実行日付 ( YYYYMMDD )
+my $SETUP_DATE = strftime("%Y%m%d", localtime);
+my $SETUP_SNIPPET_DIRECTORY = cfg($C, "pve.snippet_directory");
+
+my @SETUP_OPENWRTS = @{cfg($C, "pve.openwrts")};
+
+my $SETUP_CREATE_CLUSTER = cfg($C, "pve.create_cluster");
+my $SETUP_CLUSTER_NAME = cfg($C, "pve.cluster_name");
+
+# bash の配列表記 ( 'a' 'b' 'c' ) を生成スクリプトへ埋め込むための文字列
+my $SETUP_OPENWRTS_Q = join(" ", map { "'$_'" } @SETUP_OPENWRTS);
+my $SETUP_CLUSTER_NODES_Q = join(" ", map { "'$_'" } @SETUP_CLUSTER_NODES);
+
+# =====================================
+# ユーティリティ
+# =====================================
+
+sub run_cmd {
+    my @cmd = @_;
+    return system(@cmd); # system() の戻り値をそのまま返す
+}
+
+sub run_cmd_or_die {
+    my @cmd = @_;
+    run_cmd(@cmd) == 0
+        or die "Command failed (@cmd): $?\n";
+}
+
+sub write_file {
+    my ($path, $content, $mode) = @_;
+    open(my $fh, '>:encoding(UTF-8)', $path) or die "Cannot open $path: $!\n";
+    $fh->print($content);
+    close($fh) or die "Cannot write $path: $!\n";
+    chmod($mode, $path) or die "Cannot chmod $path: $!\n" if defined $mode;
+}
+
+sub append_file {
+    my ($path, $content) = @_;
+    open(my $fh, '>>:encoding(UTF-8)', $path) or die "Cannot open $path: $!\n";
+    $fh->print($content);
+    close($fh) or die "Cannot write $path: $!\n";
+}
+
+sub backup_file {
+    my ($path) = @_;
+    copy($path, "$path.org") or die "Failed to backup $path: $!\n";
+}
+
+# =====================================
+# 一時的に WAN へ接続できるようにする
+# 前提
+# 1. ノードは管理用 NIC へ接続中
+# 2. WAN 用 NIC は接続中・設定なし
+# =====================================
+
+sub write_temp_network_configuration {
+    backup_file("/etc/network/interfaces");
+
+    write_file("/etc/network/interfaces", <<~"EOF");
+    auto lo
+    iface lo inet loopback
+
+    iface ${SETUP_PHYSICAL_WAN_PORT} inet manual
+
+    auto vmbr_wan
+    iface vmbr_wan inet dhcp
+        gateway ${SETUP_TEMPORARY_GATEWAY}
+        bridge-ports ${SETUP_PHYSICAL_WAN_PORT}
+        bridge-stp off
+        bridge-fd 0
+
+    EOF
+
+    for my $port (@SETUP_PHYSICAL_LAN_PORTS) {
+        append_file("/etc/network/interfaces", <<~"EOF");
+        iface ${port} inet manual
+
+        EOF
+    }
+
+    append_file("/etc/network/interfaces", <<~"EOF");
+    auto vmbr_lan
+    iface vmbr_lan inet static
+        address ${SETUP_PVE_MGMT_CIDR}
+        bridge-ports @SETUP_PHYSICAL_LAN_PORTS
+        bridge-stp on
+        bridge-fd 0
+
+    source /etc/network/interfaces.d/*
+    EOF
+}
+
+sub restart_network {
+    run_cmd("ifreload", "-a"); # 失敗しても続行する
+}
+
+# =====================================
+# パッケージのインストール
+# =====================================
+
+sub disable_enterprise_repository {
+    return unless $SETUP_DISABLE_ENTERPRISE_REPOSITORY;
+    # Proxmox Enterprise Repository ( CEPH ) の無効化
+    append_file("/etc/apt/sources.list.d/ceph.sources", <<~"EOF");
+    Enabled: false
+    EOF
+    # Proxmox Enterprise Repository ( PVE ) の無効化
+    append_file("/etc/apt/sources.list.d/pve-enterprise.sources", <<~"EOF");
+    Enabled: false
+    EOF
+    # Proxmox No-Subscription Repository の追加
+    write_file("/etc/apt/sources.list.d/proxmox.sources", <<~"EOF");
+    Types: deb
+    URIs: http://download.proxmox.com/debian/pve
+    Suites: trixie
+    Components: pve-no-subscription
+    Signed-By: /usr/share/keyrings/proxmox-archive-keyring.gpg
+    EOF
+}
+
+sub change_debian_mirror {
+    my $target = "/etc/apt/sources.list.d/debian.sources";
+    backup_file($target);
+    open(my $input, '<', "$target.org") or die "Cannot open $target.org: $!\n";
+    my $content = do { local $/; <$input> };
+    close($input);
+    $content =~ s@http://deb\.debian\.org/debian/@$SETUP_DEBIAN_MIRROR_URL@;
+    write_file($target, $content);
+}
+
+sub install_packages {
+    change_debian_mirror() if $SETUP_CHANGE_DEBIAN_MIRROR;
+    run_cmd_or_die("apt-get", "update");
+    run_cmd_or_die("apt-get", "install", "openvswitch-switch", "corosync-qdevice", "-y");
+}
+
+# =====================================
+# イメージダウンロード
+# =====================================
+
+sub download_image {
+    my $image = "/var/lib/vz/template/iso/openwrt.${SETUP_OPENWRT_VERSION}.${SETUP_DATE}-ext4-combined-efi.img.gz";
+    run_cmd_or_die("wget", "-O", $image, $SETUP_OPENWRT_IMAGE_URL);
+    # OpenWrt のイメージは gunzip が警告 ( trailing garbage ignored ) 付きで終了コード 2 を返すことがある。展開自体はできているので続行する
+    run_cmd("gunzip", $image);
+}
+
+# =====================================
+# ネットワーク設定用スクリプトの配置
+# =====================================
+
+sub write_etc_systemd_system_apply_openflow_service {
+    write_file("/etc/systemd/system/apply-openflow.service", <<~"EOF");
+    [Unit]
+    Description=Apply OpenFlow rules after boot or OVS restart
+    After=network-online.target openvswitch.service
+    Wants=network-online.target
+
+    [Service]
+    Type=oneshot
+    ExecStartPre=/usr/local/bin/wait_for_ovs_intport.sh
+    ExecStart=/usr/local/bin/apply-openflow.sh
+    RemainAfterExit=true
+
+    [Install]
+    WantedBy=multi-user.target
+    EOF
+}
+
+sub write_usr_local_bin_get_ofport_sh {
+    write_file("/usr/local/bin/get_ofport.sh", <<~"EOF", 0755);
+    #!/bin/bash
+    set -e
+    PORT="\$1"
+
+    if [ -z "\$PORT" ]; then
+        echo "Usage: \$0 <port-name>" >&2
+        exit 2
+    fi
+
+    for i in \$(seq 1 10); do
+        OFP=\$(ovs-vsctl --if-exists get Interface "\$PORT" ofport 2>/dev/null)
+        if [[ -n "\$OFP" && "\$OFP" != "[]" && "\$OFP" != "-1" ]]; then
+            echo "\$OFP"
+            exit 0
+        fi
+        sleep 0.5
+    done
+
+    echo "ERROR: cannot get ofport for \$PORT" >&2
+    exit 1
+    EOF
+}
+
+sub write_usr_local_bin_wait_for_ovs_intport_sh {
+    write_file("/usr/local/bin/wait_for_ovs_intport.sh", <<~"EOF", 0755);
+    #!/bin/bash
+    set -e
+
+    MAX_WAIT=60
+    INTERVAL=2
+    elapsed=0
+
+    echo "Waiting for inet0 to acquire IP address..."
+
+    while [ \$elapsed -lt \$MAX_WAIT ]; do
+        if ip addr show inet0 | grep -q "inet "; then
+            IP=\$(ip -4 addr show inet0 | grep -oP '(?<=inet\\s)\\d+(\\.\\d+){3}/\\d+' | head -1)
+            echo "inet0 has IP address: \$IP"
+            exit 0
+        fi
+
+        sleep \$INTERVAL
+        elapsed=\$((elapsed + INTERVAL))
+        echo "Still waiting... (\${elapsed}s / \${MAX_WAIT}s)"
+    done
+
+    echo "WARNING: inet0 did not acquire IP address within \${MAX_WAIT} seconds"
+    echo "Proceeding anyway..."
+    exit 0  # 警告だけでサービスは続行
+    EOF
+}
+
+sub write_usr_local_bin_apply_openflow_sh {
+    write_file("/usr/local/bin/apply-openflow.sh", <<~"EOF", 0755);
+    #!/bin/bash
+    set -euo pipefail
+
+    CONFIG_FILE="/etc/openvswitch/networks.conf"
+
+    if [ ! -f "\$CONFIG_FILE" ]; then
+        echo "ERROR: Configuration file \$CONFIG_FILE not found" >&2
+        exit 1
+    fi
+
+    source "\$CONFIG_FILE"
+
+    get_ofport () { /usr/local/bin/get_ofport.sh "\$1"; }
+
+    # フローエントリ用ポート番号取得
+    PMGMT0=\$(get_ofport "\$PVEL3_MGMT_PORT")
+    PINET0=\$(get_ofport "\$PVEL3_INET_PORT")
+    PMGMT=\$(get_ofport "\$PATCH_TO_MGMT")
+    PVRRP=\$(get_ofport "\$PATCH_TO_VRRP")
+    PINET=\$(get_ofport "\$PATCH_TO_INET")
+    PMGMTPVEL3=\$(get_ofport "\$PATCH_FROM_PVEL3M")
+    PINETPVEL3=\$(get_ofport "\$PATCH_FROM_PVEL3I")
+    PL3=\$(get_ofport "\$PATCH_FROM_L3")
+
+    delete_flows_from_br_l3 () {
+        ovs-ofctl --protocols=OpenFlow13 del-flows "\$BR_L3" 2>/dev/null || true
+    }
+
+    add_corosync_flows_into_br_l3 () {
+        local cluster_node="\$1"
+
+        # TCP/UDP 5404-5405 ( Corosync )
+        ovs-ofctl --protocols=OpenFlow13 add-flow "\$BR_L3" \\
+            "priority=500,in_port=\${PL3},ip,nw_dst=\${cluster_node},tp_dst=5404,actions=output:\${PMGMT}"
+        ovs-ofctl --protocols=OpenFlow13 add-flow "\$BR_L3" \\
+            "priority=500,in_port=\${PL3},ip,nw_dst=\${cluster_node},tp_dst=5405,actions=output:\${PMGMT}"
+
+        # SSH ( クラスター管理用 )
+        ovs-ofctl --protocols=OpenFlow13 add-flow "\$BR_L3" \\
+            "priority=500,in_port=\${PL3},tcp,nw_dst=\${cluster_node},tp_dst=22,actions=output:\${PMGMT}"
+    }
+
+    add_mgmt_flows_into_br_l3 () {
+        # 管理ネットワーク宛て
+        ovs-ofctl --protocols=OpenFlow13 add-flow "\$BR_L3" \\
+            "priority=400,in_port=\${PL3},arp,arp_tpa=\${MGMT_NET},actions=output:\${PMGMT}"
+        ovs-ofctl --protocols=OpenFlow13 add-flow "\$BR_L3" \\
+            "priority=400,in_port=\${PL3},ip,nw_dst=\${MGMT_NET},actions=output:\${PMGMT}"
+    }
+
+    add_vrrp_flows_into_br_l3 () {
+        # VRRP マルチキャストの処理
+        ovs-ofctl --protocols=OpenFlow13 add-flow "\$BR_L3" \\
+            "priority=300,in_port=\${PL3},ip,nw_dst=224.0.0.18,actions=output:\${PVRRP}"
+
+        # VRRP ネットワーク宛て
+        ovs-ofctl --protocols=OpenFlow13 add-flow "\$BR_L3" \\
+            "priority=300,in_port=\${PL3},arp,arp_tpa=\${VRRP_NET},actions=output:\${PVRRP}"
+        ovs-ofctl --protocols=OpenFlow13 add-flow "\$BR_L3" \\
+            "priority=300,in_port=\${PL3},ip,nw_dst=\${VRRP_NET},actions=output:\${PVRRP}"
+    }
+
+    add_vrrp_flood_flows_into_br_l3 () {
+        # VRRP ネットワークからのマルチキャストを全物理ポートへ転送（フラッド）
+        ovs-ofctl --protocols=OpenFlow13 add-flow "\$BR_L3" \\
+            "priority=300,in_port=\${PVRRP},ip,nw_dst=224.0.0.18,actions=output:\${PL3}"
+    }
+
+    add_inet_flows_into_br_l3 () {
+        # その他すべて ( インターネット向け )
+        ovs-ofctl --protocols=OpenFlow13 add-flow "\$BR_L3" \\
+            "priority=200,in_port=\${PL3},actions=output:\${PINET}"
+    }
+
+    add_return_flows_into_br_l3 () {
+        # 戻りトラフィック（全物理ポートにフラッド - スイッチが適切なポートを選択）
+        ovs-ofctl --protocols=OpenFlow13 add-flow "\$BR_L3" \\
+            "priority=100,in_port=\${PMGMT},actions=output:\${PL3}"
+        ovs-ofctl --protocols=OpenFlow13 add-flow "\$BR_L3" \\
+            "priority=100,in_port=\${PVRRP},actions=output:\${PL3}"
+        ovs-ofctl --protocols=OpenFlow13 add-flow "\$BR_L3" \\
+            "priority=100,in_port=\${PINET},actions=output:\${PL3}"
+    }
+
+    add_default_drop_flow_into_br_l3 () {
+        # デフォルト : ドロップ
+        ovs-ofctl --protocols=OpenFlow13 add-flow "\$BR_L3" \\
+            "priority=0,actions=drop"
+    }
+
+    init_flows_into_br_l2 () {
+        local bridge="\$1"
+
+        ovs-ofctl --protocols=OpenFlow13 del-flows "\$bridge" 2>/dev/null || true
+        ovs-ofctl --protocols=OpenFlow13 add-flow "\$bridge" "priority=0,actions=normal"
+    }
+
+    delete_flows_from_br_pvel3 () {
+        ovs-ofctl --protocols=OpenFlow13 del-flows "\$BR_PVEL3" 2>/dev/null || true
+    }
+
+    add_mgmt_flows_into_br_pvel3 () {
+        # 管理 NW 内部通信
+        ovs-ofctl --protocols=OpenFlow13 add-flow "\$BR_PVEL3" \\
+            "priority=500,in_port=\${PMGMT0},ip,nw_dst=\${MGMT_NET},actions=output:\${PMGMTPVEL3}"
+        ovs-ofctl --protocols=OpenFlow13 add-flow "\$BR_PVEL3" \\
+            "priority=500,in_port=\${PMGMTPVEL3},ip,nw_dst=\${MGMT_NET},actions=output:\${PMGMT0}"
+    }
+
+    add_inet_flows_into_br_pvel3 () {
+        # 家庭 LAN 内部通信
+        ovs-ofctl --protocols=OpenFlow13 add-flow "\$BR_PVEL3" \\
+            "priority=500,in_port=\${PINET0},ip,actions=output:\${PINETPVEL3}"
+        ovs-ofctl --protocols=OpenFlow13 add-flow "\$BR_PVEL3" \\
+            "priority=500,in_port=\${PINETPVEL3},ip,nw_dst=\${INET_NET},actions=output:\${PINET0}"
+    }
+
+    add_security_drop_flows_into_br_pvel3 () {
+        # 管理 NW から家庭 LAN への直接アクセスを拒否
+        ovs-ofctl --protocols=OpenFlow13 add-flow "\$BR_PVEL3" \\
+            "priority=450,in_port=\${PMGMT0},ip,nw_dst=\${INET_NET},actions=drop"
+
+        # 家庭 LAN から管理 NW へのアクセスを拒否
+        ovs-ofctl --protocols=OpenFlow13 add-flow "\$BR_PVEL3" \\
+            "priority=450,in_port=\${PINET0},ip,nw_dst=\${MGMT_NET},actions=drop"
+        ovs-ofctl --protocols=OpenFlow13 add-flow "\$BR_PVEL3" \\
+            "priority=450,in_port=\${PINETPVEL3},ip,nw_dst=\${MGMT_NET},actions=drop"
+    }
+
+    add_arp_flows_into_br_pvel3 () {
+        # ARP は制限付きで許可
+        ovs-ofctl --protocols=OpenFlow13 add-flow "\$BR_PVEL3" \\
+            "priority=200,arp,arp_tpa=\${MGMT_NET},actions=output:\${PMGMTPVEL3},\${PMGMT0}"
+        ovs-ofctl --protocols=OpenFlow13 add-flow "\$BR_PVEL3" \\
+            "priority=200,arp,arp_tpa=\${INET_NET},actions=output:\${PINETPVEL3},\${PINET0}"
+    }
+
+    add_default_drop_flow_into_br_pvel3 () {
+        # デフォルト : ドロップ
+        ovs-ofctl --protocols=OpenFlow13 add-flow "\$BR_PVEL3" \\
+            "priority=0,actions=drop"
+    }
+
+    # ===== L3 振り分け用ブリッジ =====
+    delete_flows_from_br_l3
+
+    # ===== 【重要】クラスター通信の優先ルール =====
+    for node_ip in "\${CLUSTER_NODES[\@]}"; do
+        add_corosync_flows_into_br_l3 "\${node_ip}"
+    done
+
+    # 管理ネットワーク宛て
+    add_mgmt_flows_into_br_l3
+
+    # VRRP マルチキャストの処理
+    # VRRP ネットワーク宛て
+    add_vrrp_flows_into_br_l3
+
+    # VRRP ネットワークからのマルチキャストを全物理ポートへ転送（フラッド）
+    add_vrrp_flood_flows_into_br_l3
+
+    # WAN への通信用ルール
+    # その他すべて
+    add_inet_flows_into_br_l3
+
+    # 戻りトラフィック（全物理ポートにフラッド - スイッチが適切なポートを選択）
+    add_return_flows_into_br_l3
+
+    # デフォルト : ドロップ
+    add_default_drop_flow_into_br_l3
+
+    # L2 ブリッジとして動作する仮想ブリッジのフローエントリ設定
+    # Proxmox ノードに作成した OVS 仮想ブリッジはデフォルトで L2 ブリッジとして動作するため、このステップは今のところ不要。何がしたいのかを示すためコメントアウトで残す
+    #for br in "\${L2_BRIDGES[\@]}"; do
+    #    init_flows_into_br_l2 "\${br}"
+    #done
+
+    # ===== ここから下 L3 ブリッジ : PVE <-> 管理ネットワーク / 家庭 LAN 振り分け用の設定 =====
+    delete_flows_from_br_pvel3
+
+    # 管理 NW 内部通信 ( br2_mgmt 経由 )
+    add_mgmt_flows_into_br_pvel3
+
+    # 家庭 LAN 内部通信 ( br4_inet 経由 )
+    add_inet_flows_into_br_pvel3
+
+    # 管理 NW から家庭 LAN への直接アクセスを拒否
+    # 家庭 LAN から管理 NW へのアクセスを拒否
+    add_security_drop_flows_into_br_pvel3
+
+    # ARP は制限付きで許可
+    add_arp_flows_into_br_pvel3
+
+    # デフォルト : ドロップ
+    add_default_drop_flow_into_br_pvel3
+
+    echo "OpenFlow rules applied (no VLAN tags needed)"
+    EOF
+}
+
+sub write_var_lib_vz_snippets_snippets_openflow_hook_sh {
+    make_path($SETUP_SNIPPET_DIRECTORY);
+
+    backup_file("/etc/pve/storage.cfg");
+
+    write_file("/etc/pve/storage.cfg", <<~"EOF");
+    dir: local
+            path /var/lib/vz
+            content vztmpl,iso,import,backup,snippets
+
+    lvmthin: local-lvm
+            thinpool data
+            vgname pve
+            content rootdir,images
+    EOF
+
+    write_file("$SETUP_SNIPPET_DIRECTORY/openwrt-hook.sh", <<~"EOF", 0755);
+    #!/bin/bash
+    VMID="\$1"
+    PHASE="\$2"
+
+    OPENWRTS=(${SETUP_OPENWRTS_Q})
+    CONFIG_FILE="/etc/openvswitch/networks.conf"
+
+    log_message () {
+        echo "\$(date '+%Y-%m-%d %H:%M:%S') [\$HOSTNAME] \$1" >> /var/log/openwrt-hook.log
+    }
+
+    if [ ! -f "\$CONFIG_FILE" ]; then
+        log_message "ERROR: Configuration file \$CONFIG_FILE not found"
+        exit 1
+    fi
+
+    source "\$CONFIG_FILE"
+
+    detect_openwrt_port () {
+        local bridge="\$1"
+        local vmid="\$2"
+
+        if ! ovs-vsctl br-exists "\$bridge" 2>/dev/null; then
+            log_message "ERROR: Bridge \$bridge does not exist"
+            return 1
+        fi
+
+        local all_ports=\$(ovs-vsctl list-ports "\$bridge" 2>/dev/null) || return 1
+
+        # パターン 1 : ファイアウォール有効 ( VM / LXC 共通 )
+        local ports=\$(echo "\$all_ports" | grep -E "^fwln\${vmid}[io][0-9]+\$")
+        if [ -n "\$ports" ]; then
+            [ \$(echo "\$ports" | grep -c .) -gt 1 ] && log_message "WARNING: Multiple fwln ports found for VMID \$vmid on \$bridge"
+            echo "\$ports" | head -1
+            return 0
+        fi
+
+        # パターン 2 : VM, ファイアウォール無効
+        ports=\$(echo "\$all_ports" | grep -E "^tap\${vmid}[io][0-9]+\$")
+        if [ -n "\$ports" ]; then
+            [ \$(echo "\$ports" | grep -c .) -gt 1 ] && log_message "WARNING: Multiple tap ports found for VMID \$vmid on \$bridge"
+            echo "\$ports" | head -1
+            return 0
+        fi
+
+        # パターン 3 : LXC, ファイアウォール無効
+        ports=\$(echo "\$all_ports" | grep -E "^veth\${vmid}[io][0-9]+\$")
+        if [ -n "\$ports" ]; then
+            [ \$(echo "\$ports" | grep -c .) -gt 1 ] && log_message "WARNING: Multiple veth ports found for VMID \$vmid on \$bridge"
+            echo "\$ports" | head -1
+            return 0
+        fi
+
+        return 1
+    }
+
+    post_start () {
+        log_message "Container \$VMID started, waiting for veth interfaces..."
+
+        # LXC の場合、veth インターフェースが作成されるまで少し待つ
+        for i in {1..30}; do
+            VRRP_PORT=\$(detect_openwrt_port "\$BR_VRRP" "\$VMID")
+            INET_PORT=\$(detect_openwrt_port "\$BR_INET" "\$VMID")
+
+            [ \$i -eq 1 ] || [ \$((i % 5)) -eq 0 ] && \\
+                log_message "Retry \$i/30: VRRP=\${VRRP_PORT:-waiting}, INET=\${INET_PORT:-waiting}"
+
+            if [ -n "\$VRRP_PORT" ] && [ -n "\$INET_PORT" ]; then
+                log_message "\${VRRP_PORT} and \${INET_PORT} detected"
+                break
+            fi
+
+            sleep 1
+        done
+
+        if [ -z "\$VRRP_PORT" ] || [ -z "\$INET_PORT" ]; then
+            log_message "ERROR: Timeout waiting for all ports. VRRP=\${VRRP_PORT:-none}, INET=\${INET_PORT:-none}"
+            exit 1
+        fi
+
+        # OpenFlow ルール適用
+        if /usr/local/bin/apply-openflow.sh >> /var/log/openflow-apply.log 2>&1; then
+            log_message "OpenFlow rules applied successfully for CT \$VMID"
+        else
+            log_message "ERROR: Failed to apply OpenFlow rules for CT \$VMID"
+        fi
+    }
+
+    if [[ "\$PHASE" == "post-start" ]]; then
+        for id in "\${OPENWRTS[\@]}"; do
+            if [[ "\$VMID" == "\$id" ]]; then
+                post_start
+                break
+            fi
+        done
+    fi
+    EOF
+}
+
+# =====================================
+# ネットワーク変更
+# =====================================
+
+sub write_network_configuration {
+    write_file("/etc/network/interfaces", <<~"EOF");
+    auto lo
+    iface lo inet loopback
+
+    # ===== WAN 側設定 =====
+    auto ${SETUP_PHYSICAL_WAN_PORT}
+    iface ${SETUP_PHYSICAL_WAN_PORT} inet manual
+        ovs_type OVSPort
+        ovs_bridge ${SETUP_BR_WAN}
+
+    auto ${SETUP_BR_WAN}
+    iface ${SETUP_BR_WAN} inet manual
+        ovs_type OVSBridge
+        ovs_ports ${SETUP_PHYSICAL_WAN_PORT}
+
+    # ===== LAN 側設定 =====
+    EOF
+
+    for my $port (@SETUP_PHYSICAL_LAN_PORTS) {
+        append_file("/etc/network/interfaces", <<~"EOF");
+        auto ${port}
+        iface ${port} inet manual
+            ovs_type OVSPort
+            ovs_bridge ${SETUP_BR_L2}
+
+        EOF
+    }
+
+    append_file("/etc/network/interfaces", <<~"EOF");
+    # ===== 1 段目 : L2 ブリッジ =====
+    auto ${SETUP_BR_L2}
+    iface ${SETUP_BR_L2} inet manual
+        ovs_type OVSBridge
+        ovs_ports @SETUP_PHYSICAL_LAN_PORTS ${SETUP_PATCH_TO_LANL3}
+        up ovs-vsctl set Bridge \${IFACE} rstp_enable=true
+        up ovs-vsctl set Bridge \${IFACE} other_config:rstp-forward-delay=3
+        up ovs-vsctl set Bridge \${IFACE} other_config:rstp-max-age=10
+        up ovs-vsctl set Bridge \${IFACE} other_config:rstp-hello-time=2
+
+    # ===== 2 段目 : L3 振り分け用ブリッジ =====
+    auto ${SETUP_BR_L3}
+    iface ${SETUP_BR_L3} inet manual
+        ovs_type OVSBridge
+        ovs_ports ${SETUP_PATCH_FROM_LANL3} ${SETUP_PATCH_TO_MGMT} ${SETUP_PATCH_TO_VRRP} ${SETUP_PATCH_TO_INET}
+
+    # ===== 3 段目 : 管理用ブリッジ =====
+    auto ${SETUP_BR_MGMT}
+    iface ${SETUP_BR_MGMT} inet manual
+        ovs_type OVSBridge
+        ovs_ports ${SETUP_PATCH_FROM_MGMT} ${SETUP_PATCH_TO_PVEL3_MGMT}
+
+    # ===== 3 段目 : VRRP ブリッジ =====
+    auto ${SETUP_BR_VRRP}
+    iface ${SETUP_BR_VRRP} inet manual
+        ovs_type OVSBridge
+        ovs_ports ${SETUP_PATCH_FROM_VRRP}
+
+    # ===== 3 段目 : 家庭用ブリッジ =====
+    auto ${SETUP_BR_INET}
+    iface ${SETUP_BR_INET} inet manual
+        ovs_type OVSBridge
+        ovs_ports ${SETUP_PATCH_FROM_INET} ${SETUP_PATCH_TO_PVEL3_INET}
+
+    # ===== 4 段目 : PVE <-> 管理ネットワーク / 家庭 LAN 振り分け用ブリッジ =====
+    auto ${SETUP_BR_PVEL3}
+    iface ${SETUP_BR_PVEL3} inet manual
+        ovs_type OVSBridge
+        ovs_ports ${SETUP_PATCH_FROM_PVEL3_MGMT} ${SETUP_PATCH_FROM_PVEL3_INET} ${SETUP_PVEL3_MGMT_PORT} ${SETUP_PVEL3_INET_PORT}
+
+    # 管理ネットワーク用内部ポート
+    auto ${SETUP_PVEL3_MGMT_PORT}
+    iface ${SETUP_PVEL3_MGMT_PORT} inet static
+        ovs_type OVSIntPort
+        ovs_bridge ${SETUP_BR_PVEL3}
+        address ${SETUP_PVE_MGMT_CIDR}
+
+    # 家庭 LAN 用内部ポート
+    auto ${SETUP_PVEL3_INET_PORT}
+    iface ${SETUP_PVEL3_INET_PORT} inet static
+        ovs_type OVSIntPort
+        ovs_bridge ${SETUP_BR_PVEL3}
+        address ${SETUP_PVE_INET_CIDR}
+        gateway ${SETUP_PVE_DEFAULT_GATEWAY}
+
+    # ===== パッチポート定義 =====
+
+    # ${SETUP_BR_L2} <-> ${SETUP_BR_L3}
+    auto ${SETUP_PATCH_TO_LANL3}
+    iface ${SETUP_PATCH_TO_LANL3} inet manual
+        ovs_type OVSPatchPort
+        ovs_bridge ${SETUP_BR_L2}
+        ovs_patch_peer ${SETUP_PATCH_FROM_LANL3}
+
+    auto ${SETUP_PATCH_FROM_LANL3}
+    iface ${SETUP_PATCH_FROM_LANL3} inet manual
+        ovs_type OVSPatchPort
+        ovs_bridge ${SETUP_BR_L3}
+        ovs_patch_peer ${SETUP_PATCH_TO_LANL3}
+
+    # ${SETUP_BR_L3} <-> ${SETUP_BR_MGMT}
+    auto ${SETUP_PATCH_TO_MGMT}
+    iface ${SETUP_PATCH_TO_MGMT} inet manual
+        ovs_type OVSPatchPort
+        ovs_bridge ${SETUP_BR_L3}
+        ovs_patch_peer ${SETUP_PATCH_FROM_MGMT}
+
+    auto ${SETUP_PATCH_FROM_MGMT}
+    iface ${SETUP_PATCH_FROM_MGMT} inet manual
+        ovs_type OVSPatchPort
+        ovs_bridge ${SETUP_BR_MGMT}
+        ovs_patch_peer ${SETUP_PATCH_TO_MGMT}
+
+    # ${SETUP_BR_L3} <-> ${SETUP_BR_VRRP}
+    auto ${SETUP_PATCH_TO_VRRP}
+    iface ${SETUP_PATCH_TO_VRRP} inet manual
+        ovs_type OVSPatchPort
+        ovs_bridge ${SETUP_BR_L3}
+        ovs_patch_peer ${SETUP_PATCH_FROM_VRRP}
+
+    auto ${SETUP_PATCH_FROM_VRRP}
+    iface ${SETUP_PATCH_FROM_VRRP} inet manual
+        ovs_type OVSPatchPort
+        ovs_bridge ${SETUP_BR_VRRP}
+        ovs_patch_peer ${SETUP_PATCH_TO_VRRP}
+
+    # ${SETUP_BR_L3} <-> ${SETUP_BR_INET}
+    auto ${SETUP_PATCH_TO_INET}
+    iface ${SETUP_PATCH_TO_INET} inet manual
+        ovs_type OVSPatchPort
+        ovs_bridge ${SETUP_BR_L3}
+        ovs_patch_peer ${SETUP_PATCH_FROM_INET}
+
+    auto ${SETUP_PATCH_FROM_INET}
+    iface ${SETUP_PATCH_FROM_INET} inet manual
+        ovs_type OVSPatchPort
+        ovs_bridge ${SETUP_BR_INET}
+        ovs_patch_peer ${SETUP_PATCH_TO_INET}
+
+    # ${SETUP_BR_MGMT} <-> ${SETUP_BR_PVEL3}
+    auto ${SETUP_PATCH_TO_PVEL3_MGMT}
+    iface ${SETUP_PATCH_TO_PVEL3_MGMT} inet manual
+        ovs_type OVSPatchPort
+        ovs_bridge ${SETUP_BR_MGMT}
+        ovs_patch_peer ${SETUP_PATCH_FROM_PVEL3_MGMT}
+
+    auto ${SETUP_PATCH_FROM_PVEL3_MGMT}
+    iface ${SETUP_PATCH_FROM_PVEL3_MGMT} inet manual
+        ovs_type OVSPatchPort
+        ovs_bridge ${SETUP_BR_PVEL3}
+        ovs_patch_peer ${SETUP_PATCH_TO_PVEL3_MGMT}
+
+    # ${SETUP_BR_INET} <-> ${SETUP_BR_PVEL3}
+    auto ${SETUP_PATCH_TO_PVEL3_INET}
+    iface ${SETUP_PATCH_TO_PVEL3_INET} inet manual
+        ovs_type OVSPatchPort
+        ovs_bridge ${SETUP_BR_INET}
+        ovs_patch_peer ${SETUP_PATCH_FROM_PVEL3_INET}
+
+    auto ${SETUP_PATCH_FROM_PVEL3_INET}
+    iface ${SETUP_PATCH_FROM_PVEL3_INET} inet manual
+        ovs_type OVSPatchPort
+        ovs_bridge ${SETUP_BR_PVEL3}
+        ovs_patch_peer ${SETUP_PATCH_TO_PVEL3_INET}
+
+    source /etc/network/interfaces.d/*
+    EOF
+}
+
+sub write_etc_openvswitch_networks_conf {
+    write_file("/etc/openvswitch/networks.conf", <<~"EOF");
+    # 管理ネットワーク
+    MGMT_NET=${SETUP_MGMT_NET}
+    # VRRP ネットワーク
+    VRRP_NET=${SETUP_VRRP_NET}
+    # LAN ネットワーク
+    INET_NET=${SETUP_INET_NET}
+
+    # 仮想ブリッジ名
+    BR_L2=${SETUP_BR_L2}
+    BR_L3=${SETUP_BR_L3}
+    BR_MGMT=${SETUP_BR_MGMT}
+    BR_VRRP=${SETUP_BR_VRRP}
+    BR_INET=${SETUP_BR_INET}
+    BR_PVEL3=${SETUP_BR_PVEL3}
+    #L2_BRIDGES=(\$BR_L2 \$BR_MGMT \$BR_VRRP \$BR_INET)
+
+    # ポート名
+    PHYSICAL_PORTS=(@SETUP_PHYSICAL_LAN_PORTS)
+    PATCH_FROM_L3=${SETUP_PATCH_FROM_LANL3}
+    PVEL3_MGMT_PORT=${SETUP_PVEL3_MGMT_PORT}
+    PVEL3_INET_PORT=${SETUP_PVEL3_INET_PORT}
+    PATCH_TO_MGMT=${SETUP_PATCH_TO_MGMT}
+    PATCH_TO_VRRP=${SETUP_PATCH_TO_VRRP}
+    PATCH_TO_INET=${SETUP_PATCH_TO_INET}
+    PATCH_FROM_PVEL3M=${SETUP_PATCH_FROM_PVEL3_MGMT}
+    PATCH_FROM_PVEL3I=${SETUP_PATCH_FROM_PVEL3_INET}
+
+    # ノード番号
+    NODE_NUMBER=${SETUP_NODE_NUMBER}
+    # 管理ネットワーク上の IP アドレス
+    MGMT_ADDRESS=${SETUP_MGMT_NET_PREFIX}.\${NODE_NUMBER}/24
+    # クラスター上のノード
+    CLUSTER_NODES=(${SETUP_CLUSTER_NODES_Q})
+
+    # LAN の設定
+    INET_MODE=dhcp # または "static"
+    # Static モードの場合の設定例
+    # INET_ADDRESS=192.168.200.\${NODE_NUMBER}/24
+    # INET_GATEWAY=192.168.200.1
+    # INET_DNS=192.168.200.1
+    EOF
+}
+
+sub write_etc_hosts {
+    backup_file("/etc/hosts");
+
+    write_file("/etc/hosts", <<~"EOF");
+    127.0.0.1 localhost.localdomain localhost
+    ${SETUP_PVE_MGMT_IPV4} ${SETUP_NODENAME}.${SETUP_DOMAIN} ${SETUP_NODENAME}
+
+    # The following lines are desirable for IPv6 capable hosts
+
+    ::1     ip6-localhost ip6-loopback
+    fe00::0 ip6-localnet
+    ff00::0 ip6-mcastprefix
+    ff02::1 ip6-allnodes
+    ff02::2 ip6-allrouters
+    ff02::3 ip6-allhosts
+    EOF
+}
+
+sub enable_openflow_restore_service {
+    run_cmd_or_die("systemctl", "daemon-reload");
+    run_cmd_or_die("systemctl", "enable", "apply-openflow.service");
+}
+
+# =====================================
+# クラスターの作成 / 参加
+# =====================================
+
+sub create_cluster {
+    return unless $SETUP_CREATE_CLUSTER;
+    run_cmd_or_die("pvecm", "create", $SETUP_CLUSTER_NAME, "-link0", $SETUP_PVE_MGMT_IPV4);
+}
+
+sub setup_main {
+    write_temp_network_configuration();
+    restart_network();
+    print "Installing packages...\n";
+    disable_enterprise_repository();
+    install_packages();
+    print "Downloding OpenWrt container image...\n";
+    download_image();
+    print "Creating script files...\n";
+    write_etc_systemd_system_apply_openflow_service();
+    write_usr_local_bin_get_ofport_sh();
+    write_usr_local_bin_wait_for_ovs_intport_sh();
+    write_usr_local_bin_apply_openflow_sh();
+    write_var_lib_vz_snippets_snippets_openflow_hook_sh();
+    print "Writing network configuration...\n";
+    write_network_configuration();
+    write_etc_openvswitch_networks_conf();
+    write_etc_hosts();
+    enable_openflow_restore_service();
+    restart_network();
+    create_cluster();
+    print "Setup completed.\n";
+    run_cmd_or_die("shutdown", "-r", "now");
+}
+
+setup_main();

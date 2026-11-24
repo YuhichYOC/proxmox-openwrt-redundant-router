@@ -1,50 +1,40 @@
 #!/usr/bin/perl
 use strict;
 use warnings;
+use FindBin;
+use lib "$FindBin::Bin/lib";
 use IO::Handle;
+use SetupConfig qw(load_config cfg);
 
 STDOUT->autoflush(1);
 
 # =====================================
-# 設定
+# 設定の読み込み ( 値は config.toml の [qdev] へ記入する )
 # =====================================
 
-# 引数 : Ubuntu リポジトリミラー URL
-my $SETUP_UBUNTU_MIRROR_URL = "jp.archive.ubuntu.com";
+my $CONFIG_PATH = $ARGV[0] // "$FindBin::Bin/config.toml";
+my $C = load_config($CONFIG_PATH);
 
-# 引数 : LAN 側 L2 ブリッジの名前
-my $SETUP_BR_L2 = "br1_lanl2";
-# 引数 : Proxmox 管理用 L2 ブリッジの名前
-my $SETUP_BR_MGMT = "br2_mgmt";
-# 引数 : インターネットアクセス用 L2 ブリッジの名前
-my $SETUP_BR_INET = "br3_inet";
+my $SETUP_UBUNTU_MIRROR_URL = cfg($C, "qdev.ubuntu_mirror_url");
 
-# 引数 : この QDevice ノードが利用できる物理 NIC の名前
-my $SETUP_PHYSICAL_PORT = "ens33";
-# 引数 : LAN 側 L2 ブリッジ から Proxmox 管理用 L2 ブリッジ への OVS ピアポートの名前
-my $SETUP_PATCH_TO_MGMT = "p-to-mgmt";
-# 引数 : Proxmox 管理用 L2 ブリッジ から LAN 側 L2 ブリッジ への OVS ピアポートの名前
-my $SETUP_PATCH_FROM_MGMT = "p-from-mgmt";
-# 引数 : LAN 側 L2 ブリッジ から インターネットアクセス用 L2 ブリッジ への OVS ピアポートの名前
-my $SETUP_PATCH_TO_INET = "p-to-inet";
-# 引数 : インターネットアクセス用 L2 ブリッジ から LAN 側 L2 ブリッジ への OVS ピアポートの名前
-my $SETUP_PATCH_FROM_INET = "p-from-inet";
+my $SETUP_BR_L2 = cfg($C, "qdev.br_l2");
+my $SETUP_BR_MGMT = cfg($C, "qdev.br_mgmt");
+my $SETUP_BR_INET = cfg($C, "qdev.br_inet");
 
-# 引数 : Proxmox 管理用 OVS 内部インターフェースの名前
-my $SETUP_MGMT_PORT = "mgmt0";
-# 引数 : この QDevice ノードが管理 & クラスターで使用する IP アドレス ( CIDR )
-my $SETUP_MGMT_CIDR = "192.168.82.3/24";
-# 引数 : この QDevice ノードがインターネットへアクセスするための内部インターフェースの名前
-my $SETUP_INET_PORT = "inet0";
-# 引数 : この QDevice ノードがインターネットへアクセスするための IP アドレス ( CIDR )
-my $SETUP_INET_CIDR = "192.168.101.253/24";
-# 引数 : この QDevice ノードがインターネットへアクセスするためのデフォルトゲートウェイ
-my $SETUP_INET_GATEWAY = "192.168.101.1";
-# 引数 : DNS サーバーの IP アドレス
-my $SETUP_DNS_SERVER_IPV4 = "192.168.101.1";
+my $SETUP_PHYSICAL_PORT = cfg($C, "qdev.physical_port");
+my $SETUP_PATCH_TO_MGMT = cfg($C, "qdev.patch_to_mgmt");
+my $SETUP_PATCH_FROM_MGMT = cfg($C, "qdev.patch_from_mgmt");
+my $SETUP_PATCH_TO_INET = cfg($C, "qdev.patch_to_inet");
+my $SETUP_PATCH_FROM_INET = cfg($C, "qdev.patch_from_inet");
 
-# 引数 : Proxmox 管理用 OVS 内部インターフェースへ IP アドレスを設定するまでの待ち時間・このノードが起動したときからインターフェース up まで最大何秒待つか
-my $SETUP_MAX_WAIT = 10;
+my $SETUP_MGMT_PORT = cfg($C, "qdev.mgmt_port");
+my $SETUP_MGMT_CIDR = cfg($C, "qdev.mgmt_cidr");
+my $SETUP_INET_PORT = cfg($C, "qdev.inet_port");
+my $SETUP_INET_CIDR = cfg($C, "qdev.inet_cidr");
+my $SETUP_INET_GATEWAY = cfg($C, "qdev.inet_gateway");
+my $SETUP_DNS_SERVER_IPV4 = cfg($C, "qdev.dns_server_ipv4");
+
+my $SETUP_MAX_WAIT = cfg($C, "qdev.max_wait");
 
 # =====================================
 # ユーティリティ

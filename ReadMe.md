@@ -6,6 +6,6 @@ Proxmox 上の OpenWrt で冗長構成ルーターを構築するスクリプト
 | ディレクトリ | 内容 |
 | --- | --- |
 | [baseline](baseline/ReadMe.md) | 基本構成 ( OpenWrt 冗長化 + Suricata + Elasticsearch & Kibana ) |
-| [economy](economy/ReadMe.md) | baseline の Elasticsearch & Kibana を VictoriaLogs へ置き換えた省リソース構成 |
+| [economy](economy/ReadMe.md) | baseline の Elasticsearch & Kibana を VictoriaLogs へ置き換えた省リソース構成・スクリプトを perl 化し設定値を TOML ファイルへ外出し |
 
 各バージョンのセットアップ手順は、それぞれのディレクトリの ReadMe.md を参照

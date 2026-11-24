@@ -1,27 +1,28 @@
 #!/usr/bin/perl
 use strict;
 use warnings;
+use utf8;
+use FindBin;
+use lib "$FindBin::Bin/lib", "$FindBin::Bin/../lib";
 use IO::Handle;
+use SetupConfig qw(load_config cfg);
 
 # =====================================
-# ノード A : victorialogs 設定
+# VictoriaLogs コンテナ内部の設定
 # =====================================
+# setup.victorialogs.pl が config.toml の [victorialogs.guest] だけを切り出した TOML を作成し、引数として渡す
+# 使い方 : perl setup2.pl <設定ファイル>
 
-# 引数 : VictoriaLogs のバージョン
-my $SETUP_VICTORIALOGS_VERSION = "v1.51.0";
-# 引数 : VictoriaLogs の実行ユーザー名
-my $SETUP_VICTORIALOGS_USER = "victorialogs";
-# 引数 : VictoriaLogs のバイナリ配置ディレクトリ
-my $SETUP_VICTORIALOGS_BIN_DIR = "/opt/victorialogs";
-# 引数 : VictoriaLogs のデータ保存ディレクトリ
-my $SETUP_VICTORIALOGS_DATA_DIR = "/var/lib/victorialogs";
-# 引数 : ログの保存期間
-my $SETUP_VICTORIALOGS_RETENTION_PERIOD = "30d";
-# 引数 : VictoriaLogs の HTTP API ( 取り込み・検索・Web UI ) が待ち受けるポート番号
-my $SETUP_VICTORIALOGS_HTTP_PORT = 9428;
-# 引数 : VictoriaLogs の syslog リスナー ( TCP ) が待ち受けるポート番号
-# 非特権コンテナでは 1024 番未満のポートを一般ユーザーが利用できないため、syslog で使うポートを 5140 番にする
-my $SETUP_VICTORIALOGS_SYSLOG_TCP_PORT = 5140;
+my $CONFIG_PATH = $ARGV[0] // die "Usage: $0 <config.toml>\n";
+my $C = load_config($CONFIG_PATH);
+
+my $SETUP_VICTORIALOGS_VERSION = cfg($C, "version");
+my $SETUP_VICTORIALOGS_USER = cfg($C, "user");
+my $SETUP_VICTORIALOGS_BIN_DIR = cfg($C, "bin_dir");
+my $SETUP_VICTORIALOGS_DATA_DIR = cfg($C, "data_dir");
+my $SETUP_VICTORIALOGS_RETENTION_PERIOD = cfg($C, "retention_period");
+my $SETUP_VICTORIALOGS_HTTP_PORT = cfg($C, "http_port");
+my $SETUP_VICTORIALOGS_SYSLOG_TCP_PORT = cfg($C, "syslog_tcp_port");
 
 my $SETUP_VICTORIALOGS_ARCHIVE = "victoria-logs-linux-amd64-$SETUP_VICTORIALOGS_VERSION.tar.gz";
 my $SETUP_VICTORIALOGS_URL = "https://github.com/VictoriaMetrics/VictoriaLogs/releases/download/$SETUP_VICTORIALOGS_VERSION/$SETUP_VICTORIALOGS_ARCHIVE";

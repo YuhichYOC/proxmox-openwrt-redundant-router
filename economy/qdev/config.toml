@@ -1,0 +1,43 @@
+# =====================================
+# QDevice ノード設定ファイル
+# =====================================
+# setup.pl がこのファイルを読み込む
+
+[qdev]
+
+# Ubuntu リポジトリミラー URL
+ubuntu_mirror_url = "jp.archive.ubuntu.com"
+
+# LAN 側 L2 ブリッジの名前
+br_l2 = "br1_lanl2"
+# Proxmox 管理用 L2 ブリッジの名前
+br_mgmt = "br2_mgmt"
+# インターネットアクセス用 L2 ブリッジの名前
+br_inet = "br3_inet"
+
+# この QDevice ノードが利用できる物理 NIC の名前
+physical_port = "ens33"
+# LAN 側 L2 ブリッジ から Proxmox 管理用 L2 ブリッジ への OVS ピアポートの名前
+patch_to_mgmt = "p-to-mgmt"
+# Proxmox 管理用 L2 ブリッジ から LAN 側 L2 ブリッジ への OVS ピアポートの名前
+patch_from_mgmt = "p-from-mgmt"
+# LAN 側 L2 ブリッジ から インターネットアクセス用 L2 ブリッジ への OVS ピアポートの名前
+patch_to_inet = "p-to-inet"
+# インターネットアクセス用 L2 ブリッジ から LAN 側 L2 ブリッジ への OVS ピアポートの名前
+patch_from_inet = "p-from-inet"
+
+# Proxmox 管理用 OVS 内部インターフェースの名前
+mgmt_port = "mgmt0"
+# この QDevice ノードが管理 & クラスターで使用する IP アドレス ( CIDR )
+mgmt_cidr = "192.168.82.3/24"
+# この QDevice ノードがインターネットへアクセスするための内部インターフェースの名前
+inet_port = "inet0"
+# この QDevice ノードがインターネットへアクセスするための IP アドレス ( CIDR )
+inet_cidr = "192.168.101.253/24"
+# この QDevice ノードがインターネットへアクセスするためのデフォルトゲートウェイ
+inet_gateway = "192.168.101.1"
+# DNS サーバーの IP アドレス
+dns_server_ipv4 = "192.168.101.1"
+
+# Proxmox 管理用 OVS 内部インターフェースへ IP アドレスを設定するまでの待ち時間・このノードが起動したときからインターフェース up まで最大何秒待つか
+max_wait = 10
